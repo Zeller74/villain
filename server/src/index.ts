@@ -2,7 +2,8 @@ import {Server} from "socket.io";
 import {nanoid} from "nanoid";
 
 type Player = {id: string; name: string};
-type Room = {id: string; players: Player[]};
+type GameMeta = {turn: number; activePlayerId: string | null};
+type Room = {id: string; players: Player[]; game: GameMeta};
 
 const PORT = Number(process.env.PORT ?? 3001);
 const io = new Server(PORT, {
@@ -20,6 +21,7 @@ function emitRoomState(io: Server, roomId: string){
     io.to(roomId).emit("room:state", {
         roomId: room.id,
         players: room.players,
+        game: room.game,
     });
 }
 
@@ -38,6 +40,12 @@ io.on("connection", (socket) => {
                 rooms.delete(roomId);
                 console.log(`room ${roomId} deleted`);
             } else {
+                //active player leaves
+                if (room.game.activePlayerId === socket.id) {
+                    //choose the first player left
+                    const first = room.players[0]
+                    room.game.activePlayerId = first ? first.id : null;
+                }
                 emitRoomState(io, roomId);
             }
         }
@@ -54,12 +62,15 @@ io.on("connection", (socket) => {
         }
         //make a new room
         const roomId = newRoomId();
-        const room: Room = { id: roomId, players: [] };
+        const room: Room = { id: roomId, players: [] , game: {turn: 1, activePlayerId: null}};
         rooms.set(roomId, room);
 
         //join as player
         const player: Player = { id: socket.id, name };
         room.players.push(player);
+        if(!room.game.activePlayerId){
+            room.game.activePlayerId = player.id;
+        }
         socket.join(roomId);
         socket.data.roomId = roomId;
         socket.data.name   = name;
@@ -83,7 +94,12 @@ io.on("connection", (socket) => {
         }
         //avoid dupes
         if (!room.players.some(p => p.id === socket.id)) {
-            room.players.push({ id: socket.id, name });
+            room.players.push({id: socket.id, name});
+            if (!room.game.activePlayerId && room.players.length > 0) {
+                const first = room.players[0]
+                if (first) room.game.activePlayerId = first.id;
+            }
+
         }
 
         socket.join(roomId);
@@ -93,6 +109,36 @@ io.on("connection", (socket) => {
         ack?.({ ok: true });
         emitRoomState(io, roomId);
         console.log(`${name} (${socket.id}) joined room ${roomId}`);
+    });
+      
+    socket.on("game:endTurn", (ack?: (res: { ok: boolean; error?: string }) => void) => {
+        const roomId = socket.data.roomId as string | null;
+        if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+        const room = rooms.get(roomId);
+        if (!room) return ack?.({ ok: false, error: "room not found" });
+
+        //only the active player can end turn
+        if (room.game.activePlayerId !== socket.id) {
+        return ack?.({ ok: false, error: "not your turn" });
+        }
+
+        const ps = room.players;
+        if (ps.length === 0) return ack?.({ ok: false, error: "no players" });
+
+        //rotate to next player
+        const idx = ps.findIndex(p => p.id === socket.id);
+        if (idx === -1) return ack?.({ ok: false, error: "player not in room" });
+
+        const nextIdx = (idx + 1) % ps.length;
+        const nextPlayer = ps[nextIdx];
+        if (!nextPlayer) return ack?.({ok: false, error: "next player missing"});
+        
+        const wrapped = nextIdx === 0;
+        room.game.activePlayerId = nextPlayer.id;
+        if (wrapped) room.game.turn += 1;
+
+        ack?.({ ok: true });
+        emitRoomState(io, roomId);
     });
 });
 
