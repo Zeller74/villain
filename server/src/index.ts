@@ -2,8 +2,9 @@ import {Server} from "socket.io";
 import {nanoid} from "nanoid";
 
 type Player = {id: string; name: string};
+type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {turn: number; activePlayerId: string | null};
-type Room = {id: string; players: Player[]; game: GameMeta};
+type Room = {id: string; players: Player[]; game: GameMeta; messages: ChatMsg[]};
 
 const PORT = Number(process.env.PORT ?? 3001);
 const io = new Server(PORT, {
@@ -62,7 +63,7 @@ io.on("connection", (socket) => {
         }
         //make a new room
         const roomId = newRoomId();
-        const room: Room = { id: roomId, players: [] , game: {turn: 1, activePlayerId: null}};
+        const room: Room = { id: roomId, players: [] , game: {turn: 1, activePlayerId: null}, messages: []};
         rooms.set(roomId, room);
 
         //join as player
@@ -105,6 +106,10 @@ io.on("connection", (socket) => {
         socket.join(roomId);
         socket.data.roomId = roomId;
         socket.data.name   = name;
+        socket.emit("chat:history", {
+            roomId,
+            messages: room.messages
+        });
 
         ack?.({ ok: true });
         emitRoomState(io, roomId);
@@ -139,6 +144,34 @@ io.on("connection", (socket) => {
 
         ack?.({ ok: true });
         emitRoomState(io, roomId);
+    });
+
+    socket.on("chat:send", (payload: {text: string}, ack?: (res: { ok: boolean; error?: string}) => void) => {
+        const roomId = socket.data.roomId as string | null;
+        if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+        const room = rooms.get(roomId);
+        if (!room) return ack?.({ ok: false, error: "room not found" });
+        const raw = (payload?.text ?? "").trim();
+        if (!raw) return ack?.({ ok: false, error: "empty message" });
+
+        const text = raw.slice(0, 300);
+        const msg: ChatMsg = {
+        id: nanoid(8),
+        ts: Date.now(),
+        playerId: socket.id,
+        name: socket.data.name ?? "Anonymous",
+        text
+        };
+
+        room.messages.push(msg);
+        //only last 100 msgs
+        if (room.messages.length > 100) {
+        room.messages = room.messages.slice(-100);
+        }
+
+        io.to(roomId).emit("chat:msg", { roomId, msg });
+
+        ack?.({ ok: true });
     });
 });
 

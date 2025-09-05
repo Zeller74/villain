@@ -5,21 +5,24 @@ type Player = {id: string; name: string};
 type GameMeta = {turn: number; activePlayerId: string | null};
 type RoomState = {roomId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
+type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string};
 
 export default function App() {
   const sockRef = useRef<ReturnType<typeof makeSocket> | null>(null);
 
-  //connection status and welcome paylod
+  //states
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [welcome, setWelcome] = useState<WelcomeMsg | null>(null);
-  //inputs
   const [name, setName] = useState("");
   const [roomIdInput, setRoomIdInput] = useState("");
-  //roomstate
   const [room, setRoom] = useState<RoomState | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
-  //user ids
   const [myId, setMyId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [draft, setDraft] = useState("");
+  const chatBoxRef = useRef<HTMLDivElement | null>(null);
+
+  
 
   useEffect(() => {
     const s = makeSocket();
@@ -31,6 +34,7 @@ export default function App() {
     });
     s.on("disconnect", () =>{
        setStatus("disconnected");
+       setMessages([]);
        setMyId(null);
     });
     s.on("server:welcome", (msg: WelcomeMsg) => setWelcome(msg));
@@ -38,11 +42,24 @@ export default function App() {
       setRoom(st);
       setLastError(null);
     })
+    s.on("chat:history", (payload: {roomId: string; messages: ChatMsg[]}) => {
+      setMessages(payload.messages);
+    });
+    s.on("chat:msg", (payload: {roomId: string; msg: ChatMsg}) => {
+      setMessages((prev) => [...prev, payload.msg]);
+    });
+    
 
     return () => {
       s.close();
     };
   }, []);
+
+  useEffect(() => {
+    const el = chatBoxRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
 
   const createRoom = () => {
     setLastError(null);
@@ -95,8 +112,26 @@ export default function App() {
     }
   };
 
+  const sendChat = () => {
+    setLastError(null);
+    const s = sockRef.current!;
+    const text = draft.trim();
+    if (!text) return;
+
+    s.emit("chat:send", {text}, (res: {ok: boolean; error?: string}) => {
+      if (!res.ok) return setLastError(res.error || "Send failed");
+      setDraft("");
+    });
+  };
+
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
   const inRoom = !!room;
+  const onDraftKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter"){
+      e.preventDefault();
+      sendChat();
+    }
+  };
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", padding: 16, maxWidth: 640 }}>
@@ -172,6 +207,57 @@ export default function App() {
               <span style={{ marginLeft: 8, opacity: 0.7 }}>(not your turn)</span>
             )}
           </div>
+          <hr />
+          <div>
+            <p><strong>Room chat</strong></p>
+            <div
+              ref={chatBoxRef}
+              style={{
+                border: "1px solid #ddd",
+                borderRadius: 6,
+                padding: 8,
+                height: 200,
+                overflowY: "auto",
+                background: "#242424",
+                color: "#e5e7eb",
+                marginBottom: 8,
+              }}
+            >
+              {messages.length === 0 && (
+                <div style={{ opacity: 0.6 }}>No messages yet.</div>
+              )}
+              {messages.map((m) => {
+                const mine = m.playerId === myId;
+                const time = new Date(m.ts).toLocaleTimeString();
+                return (
+                  <div key={m.id} style={{ marginBottom: 6 }}>
+                    <span style={{ fontWeight: mine ? 700 : 600 }}>
+                      {m.name}{mine ? " (you)" : ""}:
+                    </span>{" "}
+                    <span>{m.text}</span>
+                    <span style={{ opacity: 0.5, marginLeft: 8, fontSize: 12 }}>
+                      {time}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onDraftKey}
+                placeholder="Type a message"
+                style={{ flex: 1, padding: 8 }}
+                disabled={!inRoom}
+              />
+              <button onClick={sendChat} disabled={!inRoom || !draft.trim()}>
+                Send
+              </button>
+            </div>
+          </div>
+
         </div>
       ) : (
         <p>Not in a room yet.</p>
