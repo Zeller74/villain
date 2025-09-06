@@ -1,10 +1,10 @@
 import {Server} from "socket.io";
 import {nanoid} from "nanoid";
 
-type Player = {id: string; name: string};
+type Player = {id: string; name: string, ready: boolean; characterId: string | null};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
-type GameMeta = {turn: number; activePlayerId: string | null};
-type Room = {id: string; players: Player[]; game: GameMeta; messages: ChatMsg[]};
+type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
+type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]};
 
 const PORT = Number(process.env.PORT ?? 3001);
 const io = new Server(PORT, {
@@ -16,11 +16,20 @@ function newRoomId(){
     return nanoid(6);
 }
 
+function isOwner(socket: any, room: Room){
+    return socket.id === room.ownerId;
+}
+
+function allReady(room: Room){
+    return room.players.length >= 1 && room.players.every(p => p.ready);
+}
+
 function emitRoomState(io: Server, roomId: string){
     const room = rooms.get(roomId);
     if (!room) return;
     io.to(roomId).emit("room:state", {
         roomId: room.id,
+        ownerId: room.ownerId,
         players: room.players,
         game: room.game,
     });
@@ -41,9 +50,12 @@ io.on("connection", (socket) => {
                 rooms.delete(roomId);
                 console.log(`room ${roomId} deleted`);
             } else {
-                //active player leaves
+                //owner handoff
+                if (room.ownerId === socket.id){
+                    room.ownerId = room.players[0]?.id ?? room.ownerId;
+                }
+                //active player handoff
                 if (room.game.activePlayerId === socket.id) {
-                    //choose the first player left
                     const first = room.players[0]
                     room.game.activePlayerId = first ? first.id : null;
                 }
@@ -63,15 +75,12 @@ io.on("connection", (socket) => {
         }
         //make a new room
         const roomId = newRoomId();
-        const room: Room = { id: roomId, players: [] , game: {turn: 1, activePlayerId: null}, messages: []};
+        const room: Room = { id: roomId, ownerId: socket.id, players: [] , game: {phase: "lobby", turn: 1, activePlayerId: null}, messages: []};
         rooms.set(roomId, room);
 
         //join as player
-        const player: Player = { id: socket.id, name };
+        const player: Player = { id: socket.id, name, ready: false, characterId: null };
         room.players.push(player);
-        if(!room.game.activePlayerId){
-            room.game.activePlayerId = player.id;
-        }
         socket.join(roomId);
         socket.data.roomId = roomId;
         socket.data.name   = name;
@@ -95,7 +104,7 @@ io.on("connection", (socket) => {
         }
         //avoid dupes
         if (!room.players.some(p => p.id === socket.id)) {
-            room.players.push({id: socket.id, name});
+            room.players.push({id: socket.id, name, ready: false, characterId: null});
             if (!room.game.activePlayerId && room.players.length > 0) {
                 const first = room.players[0]
                 if (first) room.game.activePlayerId = first.id;
@@ -115,6 +124,70 @@ io.on("connection", (socket) => {
         emitRoomState(io, roomId);
         console.log(`${name} (${socket.id}) joined room ${roomId}`);
     });
+
+    socket.on("lobby:chooseCharacter",(payload: { characterId: string }, ack?: (res: { ok: boolean; error?: string }) => void) => {
+        const roomId = socket.data.roomId as string | null;
+        if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+        const room = rooms.get(roomId);
+        if (!room) return ack?.({ ok: false, error: "room not found" });
+        if (room.game.phase !== "lobby") return ack?.({ ok: false, error: "not in lobby" });
+
+        const c = (payload?.characterId ?? "").trim().slice(0, 40);
+        if (!c) return ack?.({ ok: false, error: "character required" });
+
+        const me = room.players.find(p => p.id === socket.id);
+        if (!me) return ack?.({ ok: false, error: "player not found" });
+
+        me.characterId = c;
+        ack?.({ ok: true });
+        emitRoomState(io, roomId);
+
+        // optional: system message
+        const sys: ChatMsg = { id: nanoid(8), ts: Date.now(), playerId: "system", name: "System", text: `${me.name} chose ${c}` };
+        room.messages.push(sys); room.messages = room.messages.slice(-100);
+        io.to(roomId).emit("chat:msg", { roomId, msg: sys });
+    });
+
+    socket.on("lobby:setReady",(payload: { ready: boolean }, ack?: (res: { ok: boolean; error?: string }) => void) => {
+        const roomId = socket.data.roomId as string | null;
+        if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+        const room = rooms.get(roomId);
+        if (!room) return ack?.({ ok: false, error: "room not found" });
+        if (room.game.phase !== "lobby") return ack?.({ ok: false, error: "not in lobby" });
+
+        const me = room.players.find(p => p.id === socket.id);
+        if (!me) return ack?.({ ok: false, error: "player not found" });
+
+        me.ready = !!payload?.ready;
+        ack?.({ ok: true });
+        emitRoomState(io, roomId);
+    });
+
+    socket.on("lobby:start",(ack?: (res: { ok: boolean; error?: string }) => void) => {
+        const roomId = socket.data.roomId as string | null;
+        if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+        const room = rooms.get(roomId);
+        if (!room) return ack?.({ ok: false, error: "room not found" });
+        if (room.game.phase !== "lobby") return ack?.({ ok: false, error: "already started" });
+        if (!isOwner(socket, room)) return ack?.({ ok: false, error: "owner only" });
+        if (room.players.length < 2) return ack?.({ ok: false, error: "need at least 2 players" });
+        if (!allReady(room)) return ack?.({ ok: false, error: "not all ready" });
+
+        //transition to playing
+        room.game.phase = "playing";
+        room.game.turn = 1;
+        const first = room.players[0];
+        room.game.activePlayerId = first ? first.id : null;
+
+        ack?.({ ok: true });
+        emitRoomState(io, roomId);
+
+        //\system message
+        const sys: ChatMsg = { id: nanoid(8), ts: Date.now(), playerId: "system", name: "System", text: "Game started!" };
+        room.messages.push(sys); room.messages = room.messages.slice(-100);
+        io.to(roomId).emit("chat:msg", { roomId, msg: sys });
+    });
+
       
     socket.on("game:endTurn", (ack?: (res: { ok: boolean; error?: string }) => void) => {
         const roomId = socket.data.roomId as string | null;
