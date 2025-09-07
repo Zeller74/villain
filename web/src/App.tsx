@@ -106,6 +106,16 @@ export default function App() {
     );
   };
 
+  const leaveRoom = () => {
+    const s = sockRef.current!;
+    s.emit("room:leave", (res: { ok: boolean; error?: string }) => {
+      if (!res.ok) setLastError(res.error || "Leave failed");
+      //local reset (server will stop sending room:state)
+      setRoom(null);
+      setMessages([]);
+    });
+  };
+
   const endTurn = () => {
     setLastError(null);
     const s = sockRef.current!;
@@ -181,40 +191,91 @@ export default function App() {
 
       <hr />
 
-      <div style={{ display: "grid", gap: 8 }}>
-        <label>
-          Your name
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g., jeffrey"
-            style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
-          />
-        </label>
+      {/*create/join only when not in a room */}
+      {!inRoom && (
+        <div style={{ display: "grid", gap: 12, marginTop: 8 }}>
+          <label>
+            Your name
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g., Jeff"
+              style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
+            />
+          </label>
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={createRoom}>Create Room</button>
-          <input
-            value={roomIdInput}
-            onChange={(e) => setRoomIdInput(e.target.value)}
-            placeholder="Room ID"
-            style={{ flex: 1, padding: 8 }}
-          />
-          <button onClick={joinRoom}>Join Room</button>
+          {/*create*/}
+          <div style={{
+            border: "1px solid #e5e7eb",
+            borderRadius: 8,
+            padding: 12
+          }}>
+            <h3 style={{ margin: 0 }}>Create a room</h3>
+            <p style={{ marginTop: 6, opacity: 0.75 }}>
+              We’ll generate a room ID for you. Share it with friends to join.
+            </p>
+            <button
+              onClick={createRoom}
+              disabled={!name.trim()}
+              title={!name.trim() ? "Enter your name first" : "Create a new room"}
+            >
+              Create Room
+            </button>
+          </div>
+
+          <div style={{ textAlign: "center", opacity: 0.6 }}>— or —</div>
+
+          {/*join*/}
+          <div style={{
+            border: "1px solid #e5e7eb",
+            borderRadius: 8,
+            padding: 12
+          }}>
+            <h3 style={{ margin: 0 }}>Join a room</h3>
+            <p style={{ marginTop: 6, opacity: 0.75 }}>
+              Enter the room ID you received from the host.
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={roomIdInput}
+                onChange={(e) => setRoomIdInput(e.target.value)}
+                placeholder="Enter room ID (e.g., abc123)"
+                style={{ flex: 1, padding: 8 }}
+              />
+              <button
+                onClick={async () => {
+                  try {
+                    const t = await navigator.clipboard.readText();
+                    setRoomIdInput(t.trim());
+                  } catch {}
+                }}
+              >
+                Paste
+              </button>
+
+              <button
+                onClick={joinRoom}
+                disabled={!name.trim() || !roomIdInput.trim()}
+                title={!name.trim() ? "Enter your name first" : (!roomIdInput.trim() ? "Enter a room ID" : "Join")}
+              >
+                Join Room
+              </button>
+            </div>
+          </div>
+
+          {lastError && <div style={{ color: "crimson" }}>{lastError}</div>}
         </div>
-
-        {lastError && <div style={{ color: "crimson" }}>{lastError}</div>}
-      </div>
-
-      <hr />
+      )}
 
         {room ? (
           phase === "lobby" ? (
             //lobby screen
             <div>
-              <p>
-                <strong>Room:</strong> <code>{room.roomId}</code>{" "}
+              <p style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <strong>Room:</strong> <code>{room.roomId}</code>
                 <button onClick={copyRoomId} title="Copy to clipboard">Copy</button>
+                <span style={{ marginLeft: "auto" }} />
+                <button onClick={leaveRoom}>Leave Room</button>
               </p>
 
               <p style={{ marginTop: 8 }}>
@@ -384,7 +445,7 @@ function LobbyChat({
           return (
             <div key={m.id} style={{ marginBottom: 6 }}>
               <span style={{ fontWeight: mine ? 700 : 600 }}>
-                {m.name}{mine ? " (you)" : ""}:
+                {m.name}:
               </span>{" "}
               <span>{m.text}</span>
               <span style={{ opacity: 0.5, marginLeft: 8, fontSize: 12 }}>

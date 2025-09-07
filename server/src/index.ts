@@ -35,33 +35,52 @@ function emitRoomState(io: Server, roomId: string){
     });
 }
 
+function leaveCurrentRoom(socket: any, io: Server, opts?: { reason?: string }) {
+  const roomId = socket.data.roomId as string | null;
+  if (!roomId) { socket.data.roomId = null; return; }
+
+  const room = rooms.get(roomId);
+  if (!room) { socket.data.roomId = null; return; }
+
+  //remove player
+  room.players = room.players.filter(p => p.id !== socket.id);
+
+  //system message
+  const text = `${socket.data.name ?? "Player"} disconnected${opts?.reason ? ` (${opts.reason})` : ""}.`;
+  const sys: ChatMsg = { id: nanoid(8), ts: Date.now(), playerId: "system", name: "System", text };
+  room.messages.push(sys);
+  room.messages = room.messages.slice(-100);
+  io.to(roomId).emit("chat:msg", { roomId, msg: sys });
+
+  if (room.players.length === 0) {
+    rooms.delete(roomId);
+    console.log(`🧹 room ${roomId} deleted (empty)`);
+  } else {
+    //owner handoff
+    if (room.ownerId === socket.id) {
+        const first = room.players[0]
+        if (first){
+            room.ownerId = first.id;
+        }
+    }
+    //active player handoff
+    if (room.game.activePlayerId === socket.id) {
+      const first = room.players[0];
+      room.game.activePlayerId = first ? first.id : null;
+    }
+    emitRoomState(io, roomId);
+  }
+
+  socket.leave(roomId);
+  socket.data.roomId = null;
+}
+
+
 io.on("connection", (socket) => {
     console.log("Connected:", socket.id);
     socket.emit("Server:test message", {id: socket.id, ts: Date.now() });
     socket.on("disconnect", (reason) => {
-        const roomId = socket.data.roomId as string | null;
-        const name   = socket.data.name as string | null;
-        if (roomId && rooms.has(roomId)) {
-            const room = rooms.get(roomId)!;
-            room.players = room.players.filter(p => p.id !== socket.id);
-
-            //empty room
-            if (room.players.length === 0) {
-                rooms.delete(roomId);
-                console.log(`room ${roomId} deleted`);
-            } else {
-                //owner handoff
-                if (room.ownerId === socket.id){
-                    room.ownerId = room.players[0]?.id ?? room.ownerId;
-                }
-                //active player handoff
-                if (room.game.activePlayerId === socket.id) {
-                    const first = room.players[0]
-                    room.game.activePlayerId = first ? first.id : null;
-                }
-                emitRoomState(io, roomId);
-            }
-        }
+        leaveCurrentRoom(socket, io, { reason: "disconnect" });
         console.log("Disconnected:", socket.id, reason);
     });
     socket.data.roomId = null as null | string;
@@ -73,6 +92,11 @@ io.on("connection", (socket) => {
             ack?.({ ok: false, error: "name required" });
             return;
         }
+        if (socket.data.roomId) {
+            leaveCurrentRoom(socket, io, { reason: "switching rooms" });
+        }
+
+
         //make a new room
         const roomId = newRoomId();
         const room: Room = { id: roomId, ownerId: socket.id, players: [] , game: {phase: "lobby", turn: 1, activePlayerId: null}, messages: []};
@@ -109,8 +133,11 @@ io.on("connection", (socket) => {
                 const first = room.players[0]
                 if (first) room.game.activePlayerId = first.id;
             }
-
         }
+        if (socket.data.roomId && socket.data.roomId !== roomId) {
+            leaveCurrentRoom(socket, io, { reason: "switching rooms" });
+        }
+
 
         socket.join(roomId);
         socket.data.roomId = roomId;
@@ -123,6 +150,10 @@ io.on("connection", (socket) => {
         ack?.({ ok: true });
         emitRoomState(io, roomId);
         console.log(`${name} (${socket.id}) joined room ${roomId}`);
+    });
+    socket.on("room:leave", (ack?: (res:{ok:boolean; error?:string})=>void) => {
+        leaveCurrentRoom(socket, io, { reason: "left room" });
+        ack?.({ ok: true });
     });
 
     socket.on("lobby:chooseCharacter",(payload: { characterId: string }, ack?: (res: { ok: boolean; error?: string }) => void) => {
