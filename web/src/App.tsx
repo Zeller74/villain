@@ -29,6 +29,9 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState("");
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [inviteMode, setInviteMode] = useState(false);
+
 
   
 
@@ -68,6 +71,20 @@ export default function App() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const r = (p.get("room") || "").trim();
+    if (r) setRoomIdInput(r);
+  }, []);
+
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const r = (p.get("room") || "").trim();
+    if (r) {
+      setRoomIdInput(r);
+      setInviteMode(true);
+    }
+  }, []);
 
   const createRoom = () => {
     setLastError(null);
@@ -113,6 +130,8 @@ export default function App() {
       //local reset (server will stop sending room:state)
       setRoom(null);
       setMessages([]);
+      setInviteMode(false);
+      history.replaceState(null, "", window.location.pathname);
     });
   };
 
@@ -127,6 +146,33 @@ export default function App() {
   const copyRoomId = async () => {
     if(room?.roomId && navigator.clipboard){
       await navigator.clipboard.writeText(room.roomId);
+    }
+  };
+
+  const copyInviteLink = async () => {
+    if (!room) return;
+    // Build a clean invite URL with ?room=<id>
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("room", room.roomId);
+    const invite = url.toString();
+
+    try {
+      await navigator.clipboard.writeText(invite);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Fallback for older browsers
+      const ta = document.createElement("textarea");
+      ta.value = invite;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
     }
   };
 
@@ -150,7 +196,6 @@ export default function App() {
       if (!res.ok) setLastError(res.error || "Start failed");
     });
   };
-
 
   const sendChat = () => {
     setLastError(null);
@@ -191,8 +236,8 @@ export default function App() {
 
       <hr />
 
-      {/*create/join only when not in a room */}
-      {!inRoom && (
+      {/*create/join when not in room*/}
+      {!inRoom && !inviteMode && (
         <div style={{ display: "grid", gap: 12, marginTop: 8 }}>
           <label>
             Your name
@@ -205,20 +250,10 @@ export default function App() {
           </label>
 
           {/*create*/}
-          <div style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: 8,
-            padding: 12
-          }}>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12 }}>
             <h3 style={{ margin: 0 }}>Create a room</h3>
-            <p style={{ marginTop: 6, opacity: 0.75 }}>
-              We’ll generate a room ID for you. Share it with friends to join.
-            </p>
-            <button
-              onClick={createRoom}
-              disabled={!name.trim()}
-              title={!name.trim() ? "Enter your name first" : "Create a new room"}
-            >
+            <p style={{ marginTop: 6, opacity: 0.75 }}>We’ll generate a room ID for you.</p>
+            <button onClick={createRoom} disabled={!name.trim()}>
               Create Room
             </button>
           </div>
@@ -226,15 +261,9 @@ export default function App() {
           <div style={{ textAlign: "center", opacity: 0.6 }}>— or —</div>
 
           {/*join*/}
-          <div style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: 8,
-            padding: 12
-          }}>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12 }}>
             <h3 style={{ margin: 0 }}>Join a room</h3>
-            <p style={{ marginTop: 6, opacity: 0.75 }}>
-              Enter the room ID you received from the host.
-            </p>
+            <p style={{ marginTop: 6, opacity: 0.75 }}>Paste the room ID from the host.</p>
             <div style={{ display: "flex", gap: 8 }}>
               <input
                 value={roomIdInput}
@@ -242,22 +271,41 @@ export default function App() {
                 placeholder="Enter room ID (e.g., abc123)"
                 style={{ flex: 1, padding: 8 }}
               />
-              <button
-                onClick={async () => {
-                  try {
-                    const t = await navigator.clipboard.readText();
-                    setRoomIdInput(t.trim());
-                  } catch {}
-                }}
-              >
-                Paste
+              <button onClick={joinRoom} disabled={!name.trim() || !roomIdInput.trim()}>
+                Join Room
               </button>
+            </div>
+          </div>
 
-              <button
-                onClick={joinRoom}
-                disabled={!name.trim() || !roomIdInput.trim()}
-                title={!name.trim() ? "Enter your name first" : (!roomIdInput.trim() ? "Enter a room ID" : "Join")}
-              >
+          {lastError && <div style={{ color: "crimson" }}>{lastError}</div>}
+        </div>
+      )}
+
+      {/*join only when invited*/}
+      {!inRoom && inviteMode && (
+        <div style={{ display: "grid", gap: 12, marginTop: 8 }}>
+          <label>
+            Your name
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g., Jeff"
+              style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
+            />
+          </label>
+
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12 }}>
+            <h3 style={{ margin: 0 }}>Join this room</h3>
+            <p style={{ marginTop: 6, opacity: 0.75 }}>
+              You’ve been invited to <code>{roomIdInput}</code>.
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={roomIdInput}
+                onChange={(e) => setRoomIdInput(e.target.value)}
+                style={{ flex: 1, padding: 8 }}
+              />
+              <button onClick={joinRoom} disabled={!name.trim() || !roomIdInput.trim()}>
                 Join Room
               </button>
             </div>
@@ -273,7 +321,9 @@ export default function App() {
             <div>
               <p style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <strong>Room:</strong> <code>{room.roomId}</code>
-                <button onClick={copyRoomId} title="Copy to clipboard">Copy</button>
+                <button onClick={copyInviteLink} title="Copy invite link">
+                  {copied ? "Copied!" : "Copy Link"}
+                </button>
                 <span style={{ marginLeft: "auto" }} />
                 <button onClick={leaveRoom}>Leave Room</button>
               </p>
