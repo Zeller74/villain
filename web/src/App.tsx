@@ -9,11 +9,15 @@ const CHARACTERS = [
 ];
 
 
-type Player = {id: string; name: string; ready: boolean; characterId: string | null};
+type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number}; board: Board};
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string};
+type Card = {id: string; label: string; faceUp: boolean};
+type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
+type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
+
 
 export default function App() {
   const sockRef = useRef<ReturnType<typeof makeSocket> | null>(null);
@@ -31,7 +35,8 @@ export default function App() {
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [inviteMode, setInviteMode] = useState(false);
-
+  const [myHand, setMyHand] = useState<Card[]>([]);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
   
 
@@ -59,7 +64,13 @@ export default function App() {
     s.on("chat:msg", (payload: {roomId: string; msg: ChatMsg}) => {
       setMessages((prev) => [...prev, payload.msg]);
     });
-    
+    s.on("room:self", (payload: { roomId: string; hand: Card[]; counts: { deck: number; hand: number; discard: number } }) => {
+      setMyHand(payload.hand);
+      //clear if card left hand
+      if (selectedCardId && !payload.hand.some(c => c.id === selectedCardId)) {
+        setSelectedCardId(null);
+      }
+    });
 
     return () => {
       s.close();
@@ -206,6 +217,22 @@ export default function App() {
     s.emit("chat:send", {text}, (res: {ok: boolean; error?: string}) => {
       if (!res.ok) return setLastError(res.error || "Send failed");
       setDraft("");
+    });
+  };
+
+  const drawOne = () => {
+    const s = sockRef.current!;
+    s.emit("game:draw", { count: 1 }, (res: { ok: boolean; error?: string }) => {
+      if (!res.ok) setLastError(res.error || "Draw failed");
+    });
+  };
+
+  const playTo = (k: number) => {
+    if (!selectedCardId) return;
+    const s = sockRef.current!;
+    s.emit("game:playToLocation", { cardId: selectedCardId, locationIndex: k }, (res: { ok: boolean; error?: string }) => {
+      if (!res.ok) return setLastError(res.error || "Play failed");
+      setSelectedCardId(null);
     });
   };
 
@@ -446,6 +473,67 @@ export default function App() {
                 send={sendChat}
                 myId={myId}
               />
+
+              {/* Your board summary (counts), optional but helpful now */}
+              {me && (
+                <div style={{ marginTop: 8 }}>
+                  <strong>Your Board:</strong>
+                  <ul style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
+                    {me.board.locations.map((loc, i) => (
+                      <li key={loc.id} style={{ listStyle: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: 8 }}>
+                        <div style={{ fontWeight: 600 }}>{loc.name} (L{i+1})</div>
+                        <div style={{ fontSize: 12, opacity: 0.8 }}>
+                          top: {loc.top.length} • bottom: {loc.bottom.length}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <hr />
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <strong>Your hand</strong>
+                  <button onClick={drawOne} disabled={!isMyTurn}>Draw 1</button>
+                  {!isMyTurn && <span style={{ opacity: 0.6 }}>(not your turn)</span>}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginTop: 8, padding: 8, border: "1px solid #e5e7eb", borderRadius: 8, overflowX: "auto" }}>
+                  {myHand.length === 0 && <div style={{ opacity: 0.6 }}>Empty</div>}
+                  {myHand.map((c) => {
+                    const selected = c.id === selectedCardId;
+                    return (
+                      <div
+                        key={c.id}
+                        onClick={() => setSelectedCardId(selected ? null : c.id)}
+                        title={c.label}
+                        style={{
+                          minWidth: 80, height: 120, padding: 6,
+                          border: selected ? "2px solid #2563eb" : "1px solid #9ca3af",
+                          borderRadius: 6, background: "#111827", color: "#f1f5f9",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer", userSelect: "none",
+                        }}
+                      >
+                        <span style={{ textAlign: "center", fontSize: 12 }}>{c.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {[0,1,2,3].map(k => (
+                    <button
+                      key={k}
+                      onClick={() => playTo(k)}
+                      disabled={!selectedCardId || !isMyTurn}
+                      title={!selectedCardId ? "Select a card in your hand" : (!isMyTurn ? "Not your turn" : `Play to L${k+1}`)}
+                    >
+                      Play to L{k+1}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )
         ) : (
