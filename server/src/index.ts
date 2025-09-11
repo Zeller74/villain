@@ -423,7 +423,42 @@ io.on("connection", (socket) => {
 
         ack?.({ ok: true });
         emitRoomState(io, roomId);
-        });
+    });
+    socket.on("game:discard", (payload: {cardId?: string; cardIds?: string[]} | undefined, ack?: (res: {ok: boolean; error?: string; discarded?: number}) => void) =>{
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+
+      //only active player can discard
+      if (room.game.activePlayerId !== socket.id) {
+        return ack?.({ ok: false, error: "not your turn" });
+      }
+
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      //normalize payload to an array of ids
+      const ids = (payload?.cardIds && payload.cardIds.length > 0) ? payload.cardIds : (payload?.cardId ? [payload.cardId] : []);
+
+      if (ids.length === 0) return ack?.({ ok: false, error: "no cards specified" });
+
+      let count = 0;
+      for (const id of ids) {
+        const idx = me.zones.hand.findIndex(c => c.id === id);
+        if (idx === -1) continue; //skip unknown
+        const card = me.zones.hand.splice(idx, 1)[0]!;
+        card.faceUp = true;
+        me.zones.discard.push(card);
+        count++;
+      }
+
+      if (count === 0) return ack?.({ ok: false, error: "card(s) not in hand" });
+
+      ack?.({ ok: true, discarded: count });
+      emitRoomState(io, roomId); //public counts + your private hand via room:self
+    })
 });
 
 console.log(`Socket.io server listening on ws://localhost:${PORT}`);

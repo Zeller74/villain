@@ -37,6 +37,7 @@ export default function App() {
   const [inviteMode, setInviteMode] = useState(false);
   const [myHand, setMyHand] = useState<Card[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [focusPlayerId, setFocusPlayerId] = useState<string | null>(null);
 
   
 
@@ -96,6 +97,14 @@ export default function App() {
       setInviteMode(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!room) return;
+    if (!focusPlayerId) {
+      setFocusPlayerId(myId ?? room.players[0]?.id ?? null);
+    }
+  }, [room, myId, focusPlayerId]);
+
 
   const createRoom = () => {
     setLastError(null);
@@ -227,6 +236,22 @@ export default function App() {
     });
   };
 
+  const discardSelected = () => {
+    if (!selectedCardId) return;
+    const s = sockRef.current!;
+    s.emit("game:discard", { cardId: selectedCardId }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Discard failed");
+      setSelectedCardId(null);
+    });
+  };
+
+ const onDraftKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter"){
+      e.preventDefault();
+      sendChat();
+    }
+  };
+
   const playTo = (k: number) => {
     if (!selectedCardId) return;
     const s = sockRef.current!;
@@ -242,17 +267,12 @@ export default function App() {
   const phase = room?.game.phase ?? "lobby";
   const me = room?.players.find(p => p.id === myId) || null;
   const everyoneReady = !!room && room.players.length >= 2 && room.players.every(p => p.ready);
-
-
-  const onDraftKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter"){
-      e.preventDefault();
-      sendChat();
-    }
-  };
+  const focusPlayer = room?.players.find(p => p.id === focusPlayerId) || null;
+  const viewingSelf = !!(focusPlayer && myId && focusPlayer.id === myId);
+ 
 
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", padding: 16, maxWidth: 640 }}>
+    <div style={{ fontFamily: "system-ui, sans-serif", padding: 16}}>
       <h1>Villainous</h1>
       <p>Socket: <strong>{status}</strong></p>
       {welcome && (
@@ -426,116 +446,259 @@ export default function App() {
               />
             </div>
           ) : (
-            //game screen
+          <div style={{ display: "grid", gap: 12 }}>
+
+          {/* Header: room + copy link + leave */}
+          <p style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <strong>Room:</strong> <code>{room.roomId}</code>
+            <button onClick={copyInviteLink} title="Copy invite link">
+              {copied ? "Copied!" : "Copy Link"}
+            </button>
+            <span style={{ marginLeft: "auto" }} />
+            <button onClick={leaveRoom}>Leave Room</button>
+          </p>
+
+          {/* Turn bar */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div>
-              <p>
-                <strong>Room:</strong> <code>{room.roomId}</code>{" "}
-                <button onClick={copyRoomId} title="Copy to clipboard">Copy</button>
-              </p>
+              <strong>Turn:</strong> {room.game.turn}{" "}
+              <span style={{ opacity: 0.8 }}>
+                — Active: {room.players.find(p => p.id === room.game.activePlayerId)?.name ?? "—"}
+              </span>
+            </div>
+            <div style={{ marginLeft: "auto" }}>
+              <button onClick={endTurn} disabled={!inRoom || !isMyTurn}>
+                End Turn
+              </button>
+              {!isMyTurn && inRoom && (
+                <span style={{ marginLeft: 8, opacity: 0.7 }}>(not your turn)</span>
+              )}
+            </div>
+          </div>
 
-              <p>
-                <strong>Turn:</strong> {room.game.turn}{" "}
-                <span style={{ opacity: 0.7 }}>
-                  — Active: {room.players.find(p => p.id === room.game.activePlayerId)?.name ?? "—"}
-                </span>
-              </p>
+          {/* Camera controls */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <strong>View:</strong>
+            {room.players.map(p => (
+              <button
+                key={p.id}
+                onClick={() => setFocusPlayerId(p.id)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: p.id === focusPlayerId ? "2px solid #3b82f6" : "1px solid #334155",
+                  background: p.id === focusPlayerId ? "#1e293b" : "#111827",
+                  color: "#e5e7eb"
+                }}
+              >
+                {p.id === myId ? `${p.name} (you)` : p.name}
+              </button>
+            ))}
+          </div>
 
-              <ul>
-                {room.players.map((p) => {
-                  const active = p.id === room.game.activePlayerId;
+          {/* BOARD panel (dark) */}
+          <div
+            style={{
+              border: "1px solid #334155",
+              borderRadius: 12,
+              padding: 12,
+              background: "#1f2937",
+              color: "#e5e7eb",
+            }}
+          >
+            {focusPlayer && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                  gap: 12,
+                }}
+              >
+                {focusPlayer.board.locations.map((loc, i) => {
+                  const viewingSelf = focusPlayerId === myId;
+                  const canDropHere = viewingSelf && isMyTurn;
                   return (
-                    <li key={p.id}>
-                      {active ? "🟢" : "⚪️"} {p.name}{" "}
-                      <span style={{ opacity: 0.6 }}>({p.id.slice(0, 6)}…)</span>
-                      {myId === p.id ? " — you" : ""}
-                    </li>
+                    <div
+                      key={loc.id}
+                      style={{
+                        border: "1px solid #475569",
+                        borderRadius: 10,
+                        padding: 10,
+                        background: "#0f172a",
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                        {loc.name} (L{i + 1}) {loc.locked ? "🔒" : ""}
+                      </div>
+
+                      {/* Top (public) */}
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>Top (public)</div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {loc.top.length === 0 ? (
+                            <span style={{ opacity: 0.6, fontSize: 12 }}>empty</span>
+                          ) : (
+                            loc.top.map(c => (
+                              <div
+                                key={c.id}
+                                title={c.label}
+                                style={{
+                                  minWidth: 54, height: 78,
+                                  border: "1px solid #64748b",
+                                  borderRadius: 6,
+                                  background: "#111827",
+                                  color: "#e5e7eb",
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  fontSize: 11, padding: 4, textAlign: "center",
+                                }}
+                              >
+                                {c.label}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bottom (your plays) */}
+                      <div
+                        onClick={() => {
+                          if (!canDropHere) return;
+                          if (!selectedCardId) return setLastError("Select a card in your hand first.");
+                          playTo(i);
+                        }}
+                        style={{
+                          border: "1px dashed " + (canDropHere ? "#3b82f6" : "#475569"),
+                          borderRadius: 8,
+                          padding: 6,
+                          background: "#111827",
+                          cursor: canDropHere && selectedCardId ? "pointer" : "default",
+                          minHeight: 88,
+                        }}
+                        title={
+                          canDropHere
+                            ? (selectedCardId ? "Click to play selected card here" : "Select a card in your hand")
+                            : "You can only play on your own board during your turn"
+                        }
+                      >
+                        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>Bottom (your cards)</div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {loc.bottom.length === 0 ? (
+                            <span style={{ opacity: 0.6, fontSize: 12 }}>empty</span>
+                          ) : (
+                            loc.bottom.map(c => (
+                              <div
+                                key={c.id}
+                                title={c.label}
+                                style={{
+                                  minWidth: 54, height: 78,
+                                  border: "1px solid #64748b",
+                                  borderRadius: 6,
+                                  background: "#0b1220",
+                                  color: "#e5e7eb",
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  fontSize: 11, padding: 4, textAlign: "center",
+                                }}
+                              >
+                                {c.label}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   );
                 })}
-              </ul>
-
-              <div style={{ marginTop: 8 }}>
-                <button onClick={endTurn} disabled={!inRoom || !isMyTurn}>
-                  End Turn
-                </button>
-                {!isMyTurn && inRoom && (
-                  <span style={{ marginLeft: 8, opacity: 0.7 }}>(not your turn)</span>
-                )}
               </div>
+            )}
+          </div>
 
-              <hr />
-
-              {/*same lobby*/}
-              <LobbyChat
-                messages={messages}
-                draft={draft}
-                setDraft={setDraft}
-                onKey={onDraftKey}
-                send={sendChat}
-                myId={myId}
-              />
-
-              {/* Your board summary (counts), optional but helpful now */}
-              {me && (
-                <div style={{ marginTop: 8 }}>
-                  <strong>Your Board:</strong>
-                  <ul style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
-                    {me.board.locations.map((loc, i) => (
-                      <li key={loc.id} style={{ listStyle: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: 8 }}>
-                        <div style={{ fontWeight: 600 }}>{loc.name} (L{i+1})</div>
-                        <div style={{ fontSize: 12, opacity: 0.8 }}>
-                          top: {loc.top.length} • bottom: {loc.bottom.length}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <hr />
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <strong>Your hand</strong>
-                  <button onClick={drawOne} disabled={!isMyTurn}>Draw 1</button>
-                  {!isMyTurn && <span style={{ opacity: 0.6 }}>(not your turn)</span>}
-                </div>
-
-                <div style={{ display: "flex", gap: 8, marginTop: 8, padding: 8, border: "1px solid #e5e7eb", borderRadius: 8, overflowX: "auto" }}>
-                  {myHand.length === 0 && <div style={{ opacity: 0.6 }}>Empty</div>}
-                  {myHand.map((c) => {
-                    const selected = c.id === selectedCardId;
-                    return (
-                      <div
-                        key={c.id}
-                        onClick={() => setSelectedCardId(selected ? null : c.id)}
-                        title={c.label}
-                        style={{
-                          minWidth: 80, height: 120, padding: 6,
-                          border: selected ? "2px solid #2563eb" : "1px solid #9ca3af",
-                          borderRadius: 6, background: "#111827", color: "#f1f5f9",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          cursor: "pointer", userSelect: "none",
-                        }}
-                      >
-                        <span style={{ textAlign: "center", fontSize: 12 }}>{c.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {[0,1,2,3].map(k => (
-                    <button
-                      key={k}
-                      onClick={() => playTo(k)}
-                      disabled={!selectedCardId || !isMyTurn}
-                      title={!selectedCardId ? "Select a card in your hand" : (!isMyTurn ? "Not your turn" : `Play to L${k+1}`)}
-                    >
-                      Play to L{k+1}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {/* HAND panel (dark) */}
+          <div
+            style={{
+              border: "1px solid #334155",
+              borderRadius: 12,
+              padding: 12,
+              background: "#1f2937",
+              color: "#e5e7eb",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <strong>Your hand</strong>
+              <button onClick={drawOne} disabled={!isMyTurn}>Draw 1</button>
+              <button
+                onClick={discardSelected}
+                disabled={!isMyTurn || !selectedCardId}
+                title={!selectedCardId ? "Select a card in your hand" : "Discard the selected card"}>
+                Discard
+              </button>
+              {!isMyTurn && <span style={{ opacity: 0.7 }}>(not your turn)</span>}
             </div>
-          )
+
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginTop: 8,
+                padding: 8,
+                border: "1px solid #475569",
+                borderRadius: 8,
+                overflowX: "auto",
+                background: "#0f172a",
+              }}
+            >
+              {myHand.length === 0 && <div style={{ opacity: 0.7 }}>Empty</div>}
+              {myHand.map((c) => {
+                const selected = c.id === selectedCardId;
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => setSelectedCardId(selected ? null : c.id)}
+                    title={c.label}
+                    style={{
+                      minWidth: 88, height: 128, padding: 8,
+                      border: selected ? "2px solid #3b82f6" : "1px solid #64748b",
+                      borderRadius: 8,
+                      background: "#111827", color: "#f1f5f9",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: "pointer", userSelect: "none",
+                      textAlign: "center", fontSize: 12,
+                    }}
+                  >
+                    {c.label}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* (optional) keep button fallback for now */}
+            <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {[0,1,2,3].map(k => (
+                <button
+                  key={k}
+                  onClick={() => playTo(k)}
+                  disabled={!selectedCardId || !isMyTurn}
+                  title={!selectedCardId ? "Select a card in your hand" : (!isMyTurn ? "Not your turn" : `Play to L${k+1}`)}
+                >
+                  Play to L{k+1}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/*chat*/}
+          <div style={{ marginTop: 8 }}>
+            <LobbyChat
+              messages={messages}
+              draft={draft}
+              setDraft={setDraft}
+              onKey={onDraftKey}
+              send={sendChat}
+              myId={myId}
+            />
+          </div>
+
+        </div>
+        )
         ) : (
           <p>Not in a room yet.</p>
         )}
