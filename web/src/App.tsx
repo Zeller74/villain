@@ -9,7 +9,7 @@ const CHARACTERS = [
 ];
 
 
-type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number}; board: Board};
+type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number}; discardTop: Card | null; board: Board};
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
@@ -36,10 +36,30 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [inviteMode, setInviteMode] = useState(false);
   const [myHand, setMyHand] = useState<Card[]>([]);
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showDiscard, setShowDiscard] = useState(false);
+  const [discardCards, setDiscardCards] = useState<Card[]>([]);
+
+
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
   const [focusPlayerId, setFocusPlayerId] = useState<string | null>(null);
 
-  
+  const openDiscard = (playerId: string) => {
+    const s = sockRef.current!;
+    s.emit("pile:getDiscard", { playerId }, (res: { ok: boolean; error?: string; cards?: Card[] }) => {
+      if (!res?.ok) return setLastError(res?.error || "Failed to open discard");
+      setDiscardCards(res.cards || []);
+      setShowDiscard(true);
+    });
+  };
 
   useEffect(() => {
     const s = makeSocket();
@@ -55,10 +75,21 @@ export default function App() {
        setMyId(null);
     });
     s.on("server:welcome", (msg: WelcomeMsg) => setWelcome(msg));
-    s.on("room:state", (st: RoomState) =>{
-      setRoom(st);
+    s.on("room:state", (st: any) => {
+      const phase = st?.game?.phase ?? "(unknown)";
+      const players = Array.isArray(st?.players) ? st.players : [];
+
+      console.log("[room:state]", {
+        phase,
+        players: players.map((p: any) => ({
+          name: p?.name ?? "(?)",
+          discard: p?.counts?.discard ?? 0,
+          top: p?.discardTop?.label ?? "-",
+        })),
+      });
+      setRoom(st as RoomState);
       setLastError(null);
-    })
+    });
     s.on("chat:history", (payload: {roomId: string; messages: ChatMsg[]}) => {
       setMessages(payload.messages);
     });
@@ -66,11 +97,14 @@ export default function App() {
       setMessages((prev) => [...prev, payload.msg]);
     });
     s.on("room:self", (payload: { roomId: string; hand: Card[]; counts: { deck: number; hand: number; discard: number } }) => {
+      console.log("[room:self]", { handCount: payload.hand.length });
       setMyHand(payload.hand);
       //clear if card left hand
-      if (selectedCardId && !payload.hand.some(c => c.id === selectedCardId)) {
-        setSelectedCardId(null);
-      }
+      setSelectedIds((prev) => {
+        const have = new Set(payload.hand.map((c) => c.id));
+        const filtered = Array.from(prev).filter((id) => have.has(id));
+        return new Set(filtered);
+      });
     });
 
     return () => {
@@ -104,6 +138,12 @@ export default function App() {
       setFocusPlayerId(myId ?? room.players[0]?.id ?? null);
     }
   }, [room, myId, focusPlayerId]);
+
+  useEffect(() => {
+    if (!lastError) return;
+    const t = setTimeout(() => setLastError(null), 2200);
+    return () => clearTimeout(t);
+  }, [lastError]);
 
 
   const createRoom = () => {
@@ -237,11 +277,12 @@ export default function App() {
   };
 
   const discardSelected = () => {
-    if (!selectedCardId) return;
+    if (selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
     const s = sockRef.current!;
-    s.emit("game:discard", { cardId: selectedCardId }, (res: { ok: boolean; error?: string }) => {
+    s.emit("game:discard", { cardIds: ids }, (res: { ok: boolean; error?: string; discarded?: number }) => {
       if (!res?.ok) return setLastError(res?.error || "Discard failed");
-      setSelectedCardId(null);
+      clearSelection();
     });
   };
 
@@ -253,11 +294,15 @@ export default function App() {
   };
 
   const playTo = (k: number) => {
-    if (!selectedCardId) return;
+    if (selectedIds.size !== 1) {
+      setLastError("Select exactly one card to play.");
+      return;
+    }
+    const [onlyId] = Array.from(selectedIds);
     const s = sockRef.current!;
-    s.emit("game:playToLocation", { cardId: selectedCardId, locationIndex: k }, (res: { ok: boolean; error?: string }) => {
+    s.emit("game:playToLocation", { cardId: onlyId, locationIndex: k }, (res: { ok: boolean; error?: string }) => {
       if (!res.ok) return setLastError(res.error || "Play failed");
-      setSelectedCardId(null);
+      clearSelection();
     });
   };
 
@@ -446,6 +491,7 @@ export default function App() {
               />
             </div>
           ) : (
+          //game screen
           <div style={{ display: "grid", gap: 12 }}>
 
           {/* Header: room + copy link + leave */}
@@ -476,6 +522,17 @@ export default function App() {
             </div>
           </div>
 
+          {lastError && (
+            <div style={{
+              position: "fixed", top: 16, right: 16, zIndex: 50,
+              background: "#b91c1c", color: "white",
+              padding: "8px 12px", borderRadius: 8,
+              boxShadow: "0 6px 18px rgba(0,0,0,.35)"
+            }}>
+              {lastError}
+            </div>
+          )}
+
           {/* Camera controls */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <strong>View:</strong>
@@ -495,6 +552,25 @@ export default function App() {
               </button>
             ))}
           </div>
+            
+            {/* DEBUG: safe discard probe (remove later) */}
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              {focusPlayer
+                ? (
+                  <>
+                    <span>focus: <b>{focusPlayer.name}</b></span>
+                    <span style={{ marginLeft: 12 }}>
+                      discard: {focusPlayer.counts?.discard ?? 0}
+                    </span>
+                    <span style={{ marginLeft: 12 }}>
+                      top: {focusPlayer.discardTop?.label ?? "—"}
+                    </span>
+                  </>
+                )
+                : <span>focus: (none yet)</span>
+              }
+            </div>
+
 
           {/* BOARD panel (dark) */}
           <div
@@ -506,7 +582,14 @@ export default function App() {
               color: "#e5e7eb",
             }}
           >
+
             {focusPlayer && (
+              <>
+              <DiscardPeek
+                player={focusPlayer}
+                myId={myId}
+                onOpen={() => openDiscard(focusPlayer.id)}
+              />
               <div
                 style={{
                   display: "grid",
@@ -533,7 +616,7 @@ export default function App() {
 
                       {/* Top (public) */}
                       <div style={{ marginBottom: 8 }}>
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>Top (public)</div>
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>Top</div>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {loc.top.length === 0 ? (
                             <span style={{ opacity: 0.6, fontSize: 12 }}>empty</span>
@@ -563,7 +646,7 @@ export default function App() {
                       <div
                         onClick={() => {
                           if (!canDropHere) return;
-                          if (!selectedCardId) return setLastError("Select a card in your hand first.");
+                          if (selectedIds.size !== 1) return setLastError("Select exactly one card to play.");
                           playTo(i);
                         }}
                         style={{
@@ -571,16 +654,16 @@ export default function App() {
                           borderRadius: 8,
                           padding: 6,
                           background: "#111827",
-                          cursor: canDropHere && selectedCardId ? "pointer" : "default",
+                          cursor: canDropHere && selectedIds ? "pointer" : "default",
                           minHeight: 88,
                         }}
                         title={
                           canDropHere
-                            ? (selectedCardId ? "Click to play selected card here" : "Select a card in your hand")
+                            ? (selectedIds.size !== 1 ? "Click to play selected card here" : "Select exactly one card")
                             : "You can only play on your own board during your turn"
                         }
                       >
-                        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>Bottom (your cards)</div>
+                        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>Bottom</div>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {loc.bottom.length === 0 ? (
                             <span style={{ opacity: 0.6, fontSize: 12 }}>empty</span>
@@ -609,6 +692,7 @@ export default function App() {
                   );
                 })}
               </div>
+              </>
             )}
           </div>
 
@@ -627,8 +711,8 @@ export default function App() {
               <button onClick={drawOne} disabled={!isMyTurn}>Draw 1</button>
               <button
                 onClick={discardSelected}
-                disabled={!isMyTurn || !selectedCardId}
-                title={!selectedCardId ? "Select a card in your hand" : "Discard the selected card"}>
+                disabled={!isMyTurn || selectedIds.size === 0}
+                title={selectedIds.size === 0 ? "Select a card in your hand" : "Discard the selected card"}>
                 Discard
               </button>
               {!isMyTurn && <span style={{ opacity: 0.7 }}>(not your turn)</span>}
@@ -648,11 +732,11 @@ export default function App() {
             >
               {myHand.length === 0 && <div style={{ opacity: 0.7 }}>Empty</div>}
               {myHand.map((c) => {
-                const selected = c.id === selectedCardId;
+                const selected = selectedIds.has(c.id);
                 return (
                   <div
                     key={c.id}
-                    onClick={() => setSelectedCardId(selected ? null : c.id)}
+                    onClick={() => toggleSelect(c.id)}
                     title={c.label}
                     style={{
                       minWidth: 88, height: 128, padding: 8,
@@ -676,14 +760,21 @@ export default function App() {
                 <button
                   key={k}
                   onClick={() => playTo(k)}
-                  disabled={!selectedCardId || !isMyTurn}
-                  title={!selectedCardId ? "Select a card in your hand" : (!isMyTurn ? "Not your turn" : `Play to L${k+1}`)}
+                  disabled={selectedIds.size === 0 || !isMyTurn}
+                  title={selectedIds.size === 0 ? "Select exactly one card" : (!isMyTurn ? "Not your turn" : `Play to L${k+1}`)}
                 >
                   Play to L{k+1}
                 </button>
               ))}
             </div>
           </div>
+          
+          <DiscardModal
+            open={showDiscard}
+            cards={discardCards}
+            onClose={() => setShowDiscard(false)}
+          />
+
 
           {/*chat*/}
           <div style={{ marginTop: 8 }}>
@@ -696,14 +787,16 @@ export default function App() {
               myId={myId}
             />
           </div>
+          
 
         </div>
+        
         )
         ) : (
           <p>Not in a room yet.</p>
         )}
-
     </div>
+    
   );
 }
 
@@ -788,6 +881,154 @@ function LobbyChat({
         >
           Send
         </button>
+      </div>
+    </div>
+  );
+}
+function DiscardPeek({
+  player,
+  myId,
+  onOpen,
+}: {
+  player: Player | null;
+  myId: string | null;
+  onOpen: () => void;
+}) {
+  const count = player?.counts?.discard ?? 0;
+  const topLabel = player?.discardTop?.label ?? "—";
+  const ownerLabel = player
+    ? (myId && player.id === myId ? "Your" : `${player.name}'s`)
+    : "Discard";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        border: "1px solid #334155",
+        borderRadius: 12,
+        padding: 8,
+        background: "#111827",
+        color: "#e5e7eb",
+        marginBottom: 8,
+      }}
+    >
+      <strong>{ownerLabel} discard</strong>
+      <span style={{ opacity: 0.8 }}>({count})</span>
+
+      <span style={{ marginLeft: 8, opacity: 0.8 }}>Top:</span>
+      <span
+        style={{
+          border: "1px solid #475569",
+          borderRadius: 6,
+          padding: "4px 6px",
+          background: "#1f2937",
+        }}
+      >
+        {topLabel}
+      </span>
+
+      <span style={{ marginLeft: "auto" }} />
+      <button onClick={onOpen} disabled={count === 0}>
+        Open Discard
+      </button>
+    </div>
+  );
+}
+
+
+function DiscardModal({
+  open,
+  cards,
+  onClose,
+}: {
+  open: boolean;
+  cards: Card[];
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.55)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 100,
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(720px, 90vw)",
+          maxHeight: "75vh",
+          overflowY: "auto",
+          background: "#111827",
+          color: "#e5e7eb",
+          border: "1px solid #334155",
+          borderRadius: 12,
+          padding: 12,
+          boxShadow: "0 12px 30px rgba(0,0,0,.45)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <strong>Discard pile ({cards.length})</strong>
+          <span style={{ marginLeft: "auto" }} />
+          <button onClick={onClose}>Close</button>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
+            gap: 10,
+            marginTop: 12,
+          }}
+        >
+          {cards.length === 0 ? (
+            <div style={{ opacity: 0.7 }}>Empty</div>
+          ) : (
+            cards.map((c, idx) => (
+              <div
+                key={c.id}
+                title={c.label}
+                style={{
+                  position: "relative",
+                  minWidth: 90,
+                  height: 130,
+                  padding: 8,
+                  border: "1px solid #475569",
+                  borderRadius: 8,
+                  background: "#1f2937",
+                  color: "#f1f5f9",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  textAlign: "center",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 6,
+                    left: 8,
+                    fontSize: 11,
+                    opacity: 0.6,
+                  }}
+                >
+                  #{cards.length - idx}
+                </div>
+                {c.label}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

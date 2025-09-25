@@ -43,6 +43,7 @@ function emitRoomState(io: Server, roomId: string){
             hand: p.zones.hand.length,
             discard: p.zones.discard.length,
         },
+        discardTop: p.zones.discard.length ? p.zones.discard[p.zones.discard.length - 1] : null,
         board: {
             moverAt: p.board.moverAt,
             locations: p.board.locations.map(loc => ({
@@ -57,7 +58,7 @@ function emitRoomState(io: Server, roomId: string){
     io.to(roomId).emit("room:state", {
         roomId: room.id,
         ownerId: room.ownerId,
-        players: room.players,
+        players: publicPlayers,
         game: room.game,
     });
     emitPrivateStates(io, roomId);
@@ -458,6 +459,20 @@ io.on("connection", (socket) => {
 
       ack?.({ ok: true, discarded: count });
       emitRoomState(io, roomId); //public counts + your private hand via room:self
+    })
+    socket.on("pile:getDiscard", (payload: {playerId: string}, ack?: (res: {ok: boolean; error?: string; cards?: Card[]}) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+
+      const pid = (payload?.playerId || "").trim();
+      const target = room.players.find(p => p.id === pid);
+      if (!target) return ack?.({ ok: false, error: "player not found" });
+
+      // Discard is public. Return top-first ordering.
+      const cards = target.zones.discard.slice().reverse();
+      ack?.({ ok: true, cards });
     })
 });
 
