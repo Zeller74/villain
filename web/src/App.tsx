@@ -314,6 +314,7 @@ export default function App() {
   const everyoneReady = !!room && room.players.length >= 2 && room.players.every(p => p.ready);
   const focusPlayer = room?.players.find(p => p.id === focusPlayerId) || null;
   const viewingSelf = !!(focusPlayer && myId && focusPlayer.id === myId);
+  const myDeckCount = me?.counts?.deck ?? 0;
  
 
   return (
@@ -708,6 +709,7 @@ export default function App() {
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <strong>Your hand</strong>
+              <span style={{ marginLeft: 8, opacity: 0.8 }}>Deck: {myDeckCount}</span>
               <button onClick={drawOne} disabled={!isMyTurn}>Draw 1</button>
               <button
                 onClick={discardSelected}

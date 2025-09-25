@@ -163,6 +163,15 @@ function makeStarterDeck(ownerName: string, n = 15): Card[] {
   return cards;
 }
 
+function reshuffleFromDiscardIntoDeck(p: Player): boolean {
+  if (p.zones.deck.length > 0) return false;
+  if (p.zones.discard.length === 0) return false;
+  //move all discard to deck, face down, then shuffle
+  p.zones.deck = p.zones.discard.splice(0).map(c => ({ ...c, faceUp: false }));
+  shuffle(p.zones.deck);
+  return true;
+}
+
 
 
 io.on("connection", (socket) => {
@@ -376,23 +385,26 @@ io.on("connection", (socket) => {
         if (!room) return ack?.({ ok: false, error: "room not found" });
         if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
 
-        // only active player draws (simple rule for now)
         if (room.game.activePlayerId !== socket.id) {
-        return ack?.({ ok: false, error: "not your turn" });
+          return ack?.({ ok: false, error: "not your turn" });
         }
 
         const me = room.players.find(p => p.id === socket.id);
         if (!me) return ack?.({ ok: false, error: "player not found" });
 
-        const n = Math.max(1, Math.min(5, Number(payload?.count ?? 1))); // 1..5 safeguard
+        const n = Math.max(1, Math.min(5, Number(payload?.count ?? 1)));
         for (let i = 0; i < n; i++) {
-        const card = me.zones.deck.pop(); // top = end of array
-        if (!card) break;
-        me.zones.hand.push({ ...card, faceUp: true }); // hand is private; faceUp can be true for you
+          if (me.zones.deck.length === 0){
+            reshuffleFromDiscardIntoDeck(me);
+          }
+          const card = me.zones.deck.pop();
+          if (!card) break;
+          
+          me.zones.hand.push({ ...card, faceUp: true }); // hand is private; faceUp can be true for you
         }
 
         ack?.({ ok: true });
-        emitRoomState(io, roomId); // will also send room:self to you 
+        emitRoomState(io, roomId);
     });
     socket.on("game:playToLocation", (payload: {cardId: string; locationIndex: number}, ack?: (res: {ok: boolean; error?: string}) => void) =>{
         const roomId = socket.data.roomId as string | null;
