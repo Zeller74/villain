@@ -17,7 +17,7 @@ type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: st
 type Card = {id: string; label: string; faceUp: boolean};
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
-type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo"; text: string;}
+type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move"; text: string;}
 
 
 export default function App() {
@@ -41,26 +41,8 @@ export default function App() {
   const [showDiscard, setShowDiscard] = useState(false);
   const [discardCards, setDiscardCards] = useState<Card[]>([]);
   const [logItems, setLogItems] = useState<LogItem[]>([]);
-
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-  const clearSelection = () => setSelectedIds(new Set());
+  const [moving, setMoving] = useState<{cardId: string; from: number; label: string} | null>(null);
   const [focusPlayerId, setFocusPlayerId] = useState<string | null>(null);
-
-  const openDiscard = (playerId: string) => {
-    const s = sockRef.current!;
-    s.emit("pile:getDiscard", { playerId }, (res: { ok: boolean; error?: string; cards?: Card[] }) => {
-      if (!res?.ok) return setLastError(res?.error || "Failed to open discard");
-      setDiscardCards(res.cards || []);
-      setShowDiscard(true);
-    });
-  };
 
   useEffect(() => {
     const s = makeSocket();
@@ -148,7 +130,24 @@ export default function App() {
     const t = setTimeout(() => setLastError(null), 2200);
     return () => clearTimeout(t);
   }, [lastError]);
+  
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
 
+  const openDiscard = (playerId: string) => {
+    const s = sockRef.current!;
+    s.emit("pile:getDiscard", { playerId }, (res: { ok: boolean; error?: string; cards?: Card[] }) => {
+      if (!res?.ok) return setLastError(res?.error || "Failed to open discard");
+      setDiscardCards(res.cards || []);
+      setShowDiscard(true);
+    });
+  };
 
   const createRoom = () => {
     setLastError(null);
@@ -314,6 +313,22 @@ export default function App() {
     const s = sockRef.current!;
     s.emit("log:undoSelf", (res: { ok: boolean; error?: string }) => {
       if (!res?.ok) setLastError(res?.error || "Undo failed");
+    });
+  };
+
+  const startMove = (cardId: string, from: number, label: string) => {
+    if (!isMyTurn) { setLastError("Not your turn"); return; }
+    setMoving({ cardId, from, label });
+  };
+
+  const cancelMove = () => setMoving(null);
+
+  const dropMoveTo = (to: number) => {
+    if (!moving) return;
+    const s = sockRef.current!;
+    s.emit("game:moveCard", { cardId: moving.cardId, from: moving.from, to }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Move failed");
+      setMoving(null);
     });
   };
 
@@ -592,6 +607,16 @@ export default function App() {
               }
             </div>
 
+          {/*Move mode banner*/}
+          {moving && (
+            <div style={{
+              border: "1px solid #334155", borderRadius: 8, padding: "6px 10px",
+              background: "#111827", color: "#e5e7eb", display: "flex", alignItems: "center", gap: 8
+            }}>
+              Moving <strong>{moving.label}</strong> — click a location to drop
+              <button onClick={cancelMove} style={{ marginLeft: "auto" }}>Cancel</button>
+            </div>
+          )}
 
           {/* BOARD panel (dark) */}
           <div
@@ -667,6 +692,10 @@ export default function App() {
                       <div
                         onClick={() => {
                           if (!canDropHere) return;
+                          if(moving){
+                            dropMoveTo(i);
+                            return;
+                          }
                           if (selectedIds.size !== 1) return setLastError("Select exactly one card to play.");
                           playTo(i);
                         }}
@@ -675,12 +704,16 @@ export default function App() {
                           borderRadius: 8,
                           padding: 6,
                           background: "#111827",
-                          cursor: canDropHere && selectedIds ? "pointer" : "default",
+                          cursor: canDropHere && (moving || selectedIds.size > 0) ? "pointer" : "default",
                           minHeight: 88,
                         }}
                         title={
                           canDropHere
-                            ? (selectedIds.size !== 1 ? "Click to play selected card here" : "Select exactly one card")
+                            ? (moving
+                                ? "Click a location to drop the moving card"
+                                : (selectedIds.size === 1
+                                    ? "Click to play the selected card here"
+                                    : "Select exactly one card"))
                             : "You can only play on your own board during your turn"
                         }
                       >
@@ -690,20 +723,39 @@ export default function App() {
                             <span style={{ opacity: 0.6, fontSize: 12 }}>empty</span>
                           ) : (
                             loc.bottom.map(c => (
-                              <div
-                                key={c.id}
-                                title={c.label}
-                                style={{
-                                  minWidth: 54, height: 78,
-                                  border: "1px solid #64748b",
-                                  borderRadius: 6,
-                                  background: "#0b1220",
-                                  color: "#e5e7eb",
-                                  display: "flex", alignItems: "center", justifyContent: "center",
-                                  fontSize: 11, padding: 4, textAlign: "center",
-                                }}
-                              >
-                                {c.label}
+                              <div key={c.id} style={{ position: "relative", display: "inline-block" }}>
+                                {/* card face */}
+                                <div
+                                  title={c.label}
+                                  style={{
+                                    minWidth: 54, height: 78,
+                                    border: "1px solid #64748b",
+                                    borderRadius: 6,
+                                    background: "#0b1220",
+                                    color: "#e5e7eb",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    fontSize: 11, padding: 4, textAlign: "center",
+                                  }}
+                                >
+                                  {c.label}
+                                </div>
+
+                                {/* tiny Move overlay */}
+                                {viewingSelf && isMyTurn && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); startMove(c.id, i, c.label); }}
+                                    style={{
+                                      position: "absolute", top: 2, right: 2, zIndex: 5,
+                                      fontSize: 10, padding: "2px 6px",
+                                      borderRadius: 6, border: "1px solid #334155",
+                                      background: "#1e293b", color: "#e5e7eb",
+                                      cursor: "pointer"
+                                    }}
+                                    title="Move this card"
+                                  >
+                                    Move
+                                  </button>
+                                )}
                               </div>
                             ))
                           )}

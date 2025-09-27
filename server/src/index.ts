@@ -10,8 +10,21 @@ type Player = {id: string; name: string, ready: boolean; characterId: string | n
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
-type ActionType = "draw" | "play" | "discard" | "undo";
-type ActionEntry = {id: string; ts: number; actorId: string; type: ActionType; data: | {type: "draw"; cardIds: string[]} | {type: "play"; cardId: string; locationIndex: 0|1|2|3} | {type: "discard"; cardIds: string[]} | {type: "undo"; actionId: string}; undone?: boolean;}
+type ActionType = "draw" | "play" | "discard" | "undo" | "move";
+type ActionEntry = {
+  id: string;
+  ts: number;
+  actorId: string;
+  type: ActionType;
+  data:
+    | { type: "draw"; cardIds: string[] }
+    | { type: "play"; cardId: string; locationIndex: 0|1|2|3 }
+    | { type: "discard"; cardIds: string[] }
+    | { type: "undo"; actionId: string }
+    | { type: "move"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number };
+  undone?: boolean;
+  
+};
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: ActionType | "undo"; text: string}
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -217,6 +230,14 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
   if (e.type === "undo" && e.data.type === "undo") {
     return { id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "undo",
       text: `${name} undid their last action` };
+  }
+  if (e.type === "move" && e.data.type === "move") {
+    const from = e.data.from + 1;
+    const to = e.data.to + 1;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "move",
+      text: `${name} moved a card L${from} → L${to}`,
+    };
   }
 
   //fallback
@@ -579,6 +600,49 @@ io.on("connection", (socket) => {
       const cards = target.zones.discard.slice().reverse();
       ack?.({ ok: true, cards });
     })
+    socket.on("game:moveCard", (payload: {cardId: string; from: number; to: number}, ack?: (res: {ok: boolean; error?: string}) => void) =>{
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) {
+        return ack?.({ ok: false, error: "not your turn" });
+      }
+
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const from = Number(payload?.from);
+      const to = Number(payload?.to);
+      if (!(from >= 0 && from < 4) || !(to >= 0 && to < 4)) {
+        return ack?.({ ok: false, error: "bad location index" });
+      }
+      if (from === to) {
+        return ack?.({ ok: false, error: "moving within same location not supported yet" });
+      }
+
+      const fromLoc = me.board.locations[from];
+      const toLoc = me.board.locations[to];
+      if (!fromLoc || !toLoc) return ack?.({ ok: false, error: "bad locations" });
+
+      const idx = fromLoc.bottom.findIndex(c => c.id === payload.cardId);
+      if (idx === -1) return ack?.({ ok: false, error: "card not in source location (bottom)" });
+
+      const card = fromLoc.bottom.splice(idx, 1)[0]!;
+      const toIndex = toLoc.bottom.length; // push to end for now
+      toLoc.bottom.push(card);
+
+      ack?.({ ok: true });
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "move",
+        data: { type: "move", cardId: card.id, from: from as 0|1|2|3, to: to as 0|1|2|3, fromIndex: idx, toIndex },
+      });
+    })
     socket.on("log:undoSelf", (ack?: (res: { ok: boolean; error?: string }) => void) => {
       const roomId = socket.data.roomId as string | null;
       if (!roomId) return ack?.({ ok: false, error: "not in a room" });
@@ -624,6 +688,18 @@ io.on("connection", (socket) => {
           const card = me.zones.discard.pop()!;
           me.zones.hand.push(card);
         }
+      } else if (last.type === "move" && last.data.type === "move") {
+        const { cardId, from, to, fromIndex } = last.data;
+        const toLoc = me.board.locations[to];
+        const fromLoc = me.board.locations[from];
+        if (!toLoc || !fromLoc) return ack?.({ ok: false, error: "bad locations" });
+
+        const j = toLoc.bottom.findIndex(c => c.id === cardId);
+        if (j === -1) return ack?.({ ok: false, error: "card not in destination anymore" });
+
+        const card = toLoc.bottom.splice(j, 1)[0]!;
+        const insertAt = Math.min(Math.max(0, fromIndex), fromLoc.bottom.length);
+        fromLoc.bottom.splice(insertAt, 0, card);
       } else {
         return ack?.({ ok: false, error: "unsupported undo" });
       }
@@ -639,6 +715,7 @@ io.on("connection", (socket) => {
 
       ack?.({ ok: true });
     });
+    
 
 });
 
