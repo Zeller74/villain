@@ -17,6 +17,7 @@ type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: st
 type Card = {id: string; label: string; faceUp: boolean};
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
+type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo"; text: string;}
 
 
 export default function App() {
@@ -39,7 +40,7 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showDiscard, setShowDiscard] = useState(false);
   const [discardCards, setDiscardCards] = useState<Card[]>([]);
-
+  const [logItems, setLogItems] = useState<LogItem[]>([]);
 
 
   const toggleSelect = (id: string) => {
@@ -106,6 +107,9 @@ export default function App() {
         return new Set(filtered);
       });
     });
+    s.on("room:log", (payload: {items?: LogItem[]}) => {
+      setLogItems(Array.isArray(payload?.items) ? payload.items : []);
+    })
 
     return () => {
       s.close();
@@ -306,6 +310,14 @@ export default function App() {
     });
   };
 
+  const undoSelf = () => {
+    const s = sockRef.current!;
+    s.emit("log:undoSelf", (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) setLastError(res?.error || "Undo failed");
+    });
+  };
+
+
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
   const inRoom = !!room;
   const iAmOwner = !!(room && myId && room.ownerId === myId);
@@ -315,6 +327,8 @@ export default function App() {
   const focusPlayer = room?.players.find(p => p.id === focusPlayerId) || null;
   const viewingSelf = !!(focusPlayer && myId && focusPlayer.id === myId);
   const myDeckCount = me?.counts?.deck ?? 0;
+  const lastLog = logItems[0] ?? null;
+  const canUndo = !!(lastLog && myId && lastLog.actorId === myId && lastLog.type !== "undo" && room?.game.phase === "playing");
  
 
   return (
@@ -516,6 +530,12 @@ export default function App() {
             <div style={{ marginLeft: "auto" }}>
               <button onClick={endTurn} disabled={!inRoom || !isMyTurn}>
                 End Turn
+              </button>
+              {!isMyTurn && inRoom && (
+                <span style={{ marginLeft: 8, opacity: 0.7 }}>(not your turn)</span>
+              )}
+              <button onClick={undoSelf} disabled={!canUndo} style={{ marginLeft: 8 }}>
+                Undo
               </button>
               {!isMyTurn && inRoom && (
                 <span style={{ marginLeft: 8, opacity: 0.7 }}>(not your turn)</span>
@@ -789,10 +809,48 @@ export default function App() {
               myId={myId}
             />
           </div>
-          
 
+          <div
+            style={{
+              marginTop: 12,
+              border: "1px solid #334155",
+              borderRadius: 12,
+              padding: 12,
+              background: "#111827",
+              color: "#e5e7eb",
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: 16 }}>Action log</h3>
+            <div
+              style={{
+                marginTop: 8,
+                maxHeight: 240,
+                overflowY: "auto",
+                display: "grid",
+                gap: 6,
+              }}
+            >
+              {logItems.length === 0 ? (
+                <div style={{ opacity: 0.7, fontSize: 12 }}>No actions yet.</div>
+              ) : (
+                logItems.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{ fontSize: 12, opacity: item.type === "undo" ? 0.75 : 1 }}
+                    title={new Date(item.ts).toLocaleString()}
+                  >
+                    <span style={{ opacity: 0.7, marginRight: 6 }}>
+                      {new Date(item.ts).toLocaleTimeString()}
+                    </span>
+                    <span>
+                      <strong>{item.actorName}</strong>: {item.text}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
-        
         )
         ) : (
           <p>Not in a room yet.</p>

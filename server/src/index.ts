@@ -5,11 +5,14 @@ import { measureMemory } from "vm";
 type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?: boolean};
 type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, Location]}
 type Card = {id: string; label: string; faceUp: boolean};
-type Zones = {deck: Card[]; hand: Card[]; board: Card[]; discard: Card[]};
+type Zones = {deck: Card[]; hand: Card[]; discard: Card[]};
 type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
-type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]};
+type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
+type ActionType = "draw" | "play" | "discard" | "undo";
+type ActionEntry = {id: string; ts: number; actorId: string; type: ActionType; data: | {type: "draw"; cardIds: string[]} | {type: "play"; cardId: string; locationIndex: 0|1|2|3} | {type: "discard"; cardIds: string[]} | {type: "undo"; actionId: string}; undone?: boolean;}
+type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: ActionType | "undo"; text: string}
 
 const PORT = Number(process.env.PORT ?? 3001);
 const io = new Server(PORT, {
@@ -172,6 +175,74 @@ function reshuffleFromDiscardIntoDeck(p: Player): boolean {
   return true;
 }
 
+function buildLogItem(room: Room, e: ActionEntry): LogItem {
+  const actor = room.players.find(p => p.id === e.actorId);
+  const name = actor?.name ?? e.actorId.slice(0, 6);
+
+  if (e.undone) {
+    return {
+      id: e.id,
+      ts: e.ts,
+      actorId: e.actorId,
+      actorName: name,
+      type: "undo",
+      text: `${name} undid their last action`,
+    };
+  }
+
+  if (e.type === "draw" && e.data.type === "draw") {
+    const n = e.data.cardIds.length;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "draw",
+      text: `${name} drew ${n} card${n === 1 ? "" : "s"}`
+    };
+  }
+
+  if (e.type === "play" && e.data.type === "play") {
+    const k = e.data.locationIndex + 1;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "play",
+      text: `${name} played a card to L${k}`
+    };
+  }
+
+  if (e.type === "discard" && e.data.type === "discard") {
+    const n = e.data.cardIds.length;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "discard",
+      text: `${name} discarded ${n} card${n === 1 ? "" : "s"}`
+    };
+  }
+
+  if (e.type === "undo" && e.data.type === "undo") {
+    return { id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "undo",
+      text: `${name} undid their last action` };
+  }
+
+  //fallback
+  return {
+    id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: e.type,
+    text: `${name} did ${e.type}`
+  };
+}
+
+function emitRoomLog(io: Server, roomId: string) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  // Broadcast a sanitized view (most recent first)
+  const items: LogItem[] = room.log.slice(-25).map(e => buildLogItem(room, e)).reverse();
+  io.to(roomId).emit("room:log", { items });
+}
+
+// append and broadcast (cap length to keep memory bounded)
+function pushLog(io: Server, roomId: string, entry: ActionEntry) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  room.log.push(entry);
+  if (room.log.length > 25) room.log.splice(0, room.log.length - 25);
+  emitRoomLog(io, roomId);
+}
+
 
 
 io.on("connection", (socket) => {
@@ -197,11 +268,11 @@ io.on("connection", (socket) => {
 
         //make a new room
         const roomId = newRoomId();
-        const room: Room = { id: roomId, ownerId: socket.id, players: [] , game: {phase: "lobby", turn: 1, activePlayerId: null}, messages: []};
+        const room: Room = { id: roomId, ownerId: socket.id, players: [] , game: {phase: "lobby", turn: 1, activePlayerId: null}, messages: [], log: []};
         rooms.set(roomId, room);
 
         //join as player
-        const player: Player = { id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand:[], board: [], discard: []}, board: makeEmptyBoard() };
+        const player: Player = { id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand:[], discard: []}, board: makeEmptyBoard() };
         room.players.push(player);
         socket.join(roomId);
         socket.data.roomId = roomId;
@@ -209,6 +280,7 @@ io.on("connection", (socket) => {
 
         ack?.({ ok: true, roomId });
         emitRoomState(io, roomId);
+        emitRoomLog(io, room.id);
         console.log(`Room ${roomId} created by ${name} (${socket.id})`);
     });
     //join by id
@@ -226,7 +298,7 @@ io.on("connection", (socket) => {
         }
         //avoid dupes
         if (!room.players.some(p => p.id === socket.id)) {
-            room.players.push({id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand: [], board: [], discard: []}, board: makeEmptyBoard()});
+            room.players.push({id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand: [], discard: []}, board: makeEmptyBoard()});
             if (!room.game.activePlayerId && room.players.length > 0) {
                 const first = room.players[0]
                 if (first) room.game.activePlayerId = first.id;
@@ -247,6 +319,7 @@ io.on("connection", (socket) => {
 
         ack?.({ ok: true });
         emitRoomState(io, roomId);
+        emitRoomLog(io, room.id);
         console.log(`${name} (${socket.id}) joined room ${roomId}`);
     });
     socket.on("room:leave", (ack?: (res:{ok:boolean; error?:string})=>void) => {
@@ -343,7 +416,7 @@ io.on("connection", (socket) => {
 
         ack?.({ ok: true });
         emitRoomState(io, roomId);
-
+        emitRoomLog(io, room.id);
         //\system message
         const sys: ChatMsg = { id: nanoid(8), ts: Date.now(), playerId: "system", name: "System", text: "Game started!" };
         room.messages.push(sys); room.messages = room.messages.slice(-100);
@@ -393,18 +466,24 @@ io.on("connection", (socket) => {
         if (!me) return ack?.({ ok: false, error: "player not found" });
 
         const n = Math.max(1, Math.min(5, Number(payload?.count ?? 1)));
+        const drawnIds: string[] = [];  // collect while drawing
         for (let i = 0; i < n; i++) {
-          if (me.zones.deck.length === 0){
-            reshuffleFromDiscardIntoDeck(me);
-          }
+          if (me.zones.deck.length === 0) reshuffleFromDiscardIntoDeck(me);
           const card = me.zones.deck.pop();
           if (!card) break;
-          
-          me.zones.hand.push({ ...card, faceUp: true }); // hand is private; faceUp can be true for you
+          const c = { ...card, faceUp: true };
+          me.zones.hand.push(c);
+          drawnIds.push(c.id);
         }
-
         ack?.({ ok: true });
         emitRoomState(io, roomId);
+        pushLog(io, roomId, {
+          id: nanoid(8),
+          ts: Date.now(),
+          actorId: socket.id,
+          type: "draw",
+          data: { type: "draw", cardIds: drawnIds },
+        });
     });
     socket.on("game:playToLocation", (payload: {cardId: string; locationIndex: number}, ack?: (res: {ok: boolean; error?: string}) => void) =>{
         const roomId = socket.data.roomId as string | null;
@@ -436,6 +515,13 @@ io.on("connection", (socket) => {
 
         ack?.({ ok: true });
         emitRoomState(io, roomId);
+        pushLog(io, roomId, {
+          id: nanoid(8),
+          ts: Date.now(),
+          actorId: socket.id,
+          type: "play",
+          data: { type: "play", cardId: card.id, locationIndex: k as 0|1|2|3 },
+        });
     });
     socket.on("game:discard", (payload: {cardId?: string; cardIds?: string[]} | undefined, ack?: (res: {ok: boolean; error?: string; discarded?: number}) => void) =>{
       const roomId = socket.data.roomId as string | null;
@@ -471,6 +557,13 @@ io.on("connection", (socket) => {
 
       ack?.({ ok: true, discarded: count });
       emitRoomState(io, roomId); //public counts + your private hand via room:self
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "discard",
+        data: { type: "discard", cardIds: ids },
+      });
     })
     socket.on("pile:getDiscard", (payload: {playerId: string}, ack?: (res: {ok: boolean; error?: string; cards?: Card[]}) => void) => {
       const roomId = socket.data.roomId as string | null;
@@ -486,6 +579,67 @@ io.on("connection", (socket) => {
       const cards = target.zones.discard.slice().reverse();
       ack?.({ ok: true, cards });
     })
+    socket.on("log:undoSelf", (ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+
+      const last = room.log[room.log.length - 1];
+      if (!last) return ack?.({ ok: false, error: "nothing to undo" });
+      if (last.actorId !== socket.id) return ack?.({ ok: false, error: "only your last action can be undone" });
+      if (last.undone) return ack?.({ ok: false, error: "already undone" });
+
+      const me = room.players.find(p => p.id === socket.id)!;
+
+      if (last.type === "draw" && last.data.type === "draw") {
+        const ids = last.data.cardIds;
+        if (!ids.every(id => me.zones.hand.some(c => c.id === id))) {
+          return ack?.({ ok: false, error: "cannot undo: cards already moved" });
+        }
+        for (let i = ids.length - 1; i >= 0; i--) {
+          const id = ids[i];
+          const idx = me.zones.hand.findIndex(c => c.id === id);
+          const card = me.zones.hand.splice(idx, 1)[0]!;
+          card.faceUp = false;
+          me.zones.deck.push(card);
+        }
+      } else if (last.type === "play" && last.data.type === "play") {
+        const { cardId, locationIndex } = last.data;
+        const loc = me.board.locations[locationIndex];
+        if (!loc) return ack?.({ ok: false, error: "bad location" });
+        const idx = loc.bottom.findIndex(c => c.id === cardId);
+        if (idx === -1) return ack?.({ ok: false, error: "card not on board anymore" });
+        const card = loc.bottom.splice(idx, 1)[0]!;
+        me.zones.hand.push(card);
+      } else if (last.type === "discard" && last.data.type === "discard") {
+        const ids = last.data.cardIds;
+        for (let i = ids.length - 1; i >= 0; i--) {
+          const id = ids[i];
+          const top = me.zones.discard[me.zones.discard.length - 1];
+          if (!top || top.id !== id) {
+            return ack?.({ ok: false, error: "cannot undo: discard changed" });
+          }
+          const card = me.zones.discard.pop()!;
+          me.zones.hand.push(card);
+        }
+      } else {
+        return ack?.({ ok: false, error: "unsupported undo" });
+      }
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "undo",
+        data: { type: "undo", actionId: last.id },
+      });
+
+      ack?.({ ok: true });
+    });
+
 });
 
 console.log(`Socket.io server listening on ws://localhost:${PORT}`);
