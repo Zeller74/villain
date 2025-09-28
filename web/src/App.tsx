@@ -17,7 +17,7 @@ type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: st
 type Card = {id: string; label: string; faceUp: boolean};
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
-type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move"; text: string;}
+type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove"; text: string;}
 
 
 export default function App() {
@@ -332,6 +332,15 @@ export default function App() {
     });
   };
 
+  const removeFromBoard = () => {
+    if (!moving) return;
+    const s = sockRef.current!;
+    s.emit("game:removeCard", { cardId: moving.cardId, from: moving.from }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Remove failed");
+      setMoving(null);
+    });
+  };
+
 
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
   const inRoom = !!room;
@@ -613,7 +622,9 @@ export default function App() {
               border: "1px solid #334155", borderRadius: 8, padding: "6px 10px",
               background: "#111827", color: "#e5e7eb", display: "flex", alignItems: "center", gap: 8
             }}>
-              Moving <strong>{moving.label}</strong> — click a location to drop
+              Moving <strong>{moving.label}</strong>
+              <span style={{ opacity: 0.7 }}>&middot; click a location to drop</span>
+              <button onClick={removeFromBoard} style={{ marginLeft: "auto" }}>Discard card</button>
               <button onClick={cancelMove} style={{ marginLeft: "auto" }}>Cancel</button>
             </div>
           )}
@@ -691,11 +702,11 @@ export default function App() {
                       {/* Bottom (your plays) */}
                       <div
                         onClick={() => {
-                          if (!canDropHere) return;
                           if(moving){
                             dropMoveTo(i);
                             return;
                           }
+                          if (!canDropHere) return;
                           if (selectedIds.size !== 1) return setLastError("Select exactly one card to play.");
                           playTo(i);
                         }}
@@ -726,6 +737,12 @@ export default function App() {
                               <div key={c.id} style={{ position: "relative", display: "inline-block" }}>
                                 {/* card face */}
                                 <div
+                                  onClick={(e) => {
+                                    //don't trigger play
+                                    e.stopPropagation();               
+                                    if (!isMyTurn || focusPlayerId !== myId) return;
+                                    startMove(c.id, i, c.label);
+                                  }}
                                   title={c.label}
                                   style={{
                                     minWidth: 54, height: 78,
@@ -735,27 +752,11 @@ export default function App() {
                                     color: "#e5e7eb",
                                     display: "flex", alignItems: "center", justifyContent: "center",
                                     fontSize: 11, padding: 4, textAlign: "center",
+                                    cursor: (isMyTurn && focusPlayerId === myId) ? "pointer" : "default",
                                   }}
                                 >
                                   {c.label}
                                 </div>
-
-                                {/* tiny Move overlay */}
-                                {viewingSelf && isMyTurn && (
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); startMove(c.id, i, c.label); }}
-                                    style={{
-                                      position: "absolute", top: 2, right: 2, zIndex: 5,
-                                      fontSize: 10, padding: "2px 6px",
-                                      borderRadius: 6, border: "1px solid #334155",
-                                      background: "#1e293b", color: "#e5e7eb",
-                                      cursor: "pointer"
-                                    }}
-                                    title="Move this card"
-                                  >
-                                    Move
-                                  </button>
-                                )}
                               </div>
                             ))
                           )}

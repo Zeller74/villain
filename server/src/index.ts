@@ -10,7 +10,7 @@ type Player = {id: string; name: string, ready: boolean; characterId: string | n
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -21,7 +21,8 @@ type ActionEntry = {
     | { type: "play"; cardId: string; locationIndex: 0|1|2|3 }
     | { type: "discard"; cardIds: string[] }
     | { type: "undo"; actionId: string }
-    | { type: "move"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number };
+    | { type: "move"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number }
+    | { type: "remove"; cardId: string; from: 0|1|2|3; fromIndex: number };
   undone?: boolean;
   
 };
@@ -239,6 +240,14 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} moved a card L${from} → L${to}`,
     };
   }
+  if (e.type === "remove" && e.data.type === "remove") {
+  const from = e.data.from + 1;
+  return {
+    id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "remove",
+    text: `${name} discarded a board card from L${from}`,
+  };
+}
+
 
   //fallback
   return {
@@ -585,7 +594,7 @@ io.on("connection", (socket) => {
         type: "discard",
         data: { type: "discard", cardIds: ids },
       });
-    })
+    });
     socket.on("pile:getDiscard", (payload: {playerId: string}, ack?: (res: {ok: boolean; error?: string; cards?: Card[]}) => void) => {
       const roomId = socket.data.roomId as string | null;
       if (!roomId) return ack?.({ ok: false, error: "not in a room" });
@@ -599,7 +608,7 @@ io.on("connection", (socket) => {
       // Discard is public. Return top-first ordering.
       const cards = target.zones.discard.slice().reverse();
       ack?.({ ok: true, cards });
-    })
+    });
     socket.on("game:moveCard", (payload: {cardId: string; from: number; to: number}, ack?: (res: {ok: boolean; error?: string}) => void) =>{
       const roomId = socket.data.roomId as string | null;
       if (!roomId) return ack?.({ ok: false, error: "not in a room" });
@@ -642,7 +651,7 @@ io.on("connection", (socket) => {
         type: "move",
         data: { type: "move", cardId: card.id, from: from as 0|1|2|3, to: to as 0|1|2|3, fromIndex: idx, toIndex },
       });
-    })
+    });
     socket.on("log:undoSelf", (ack?: (res: { ok: boolean; error?: string }) => void) => {
       const roomId = socket.data.roomId as string | null;
       if (!roomId) return ack?.({ ok: false, error: "not in a room" });
@@ -700,6 +709,18 @@ io.on("connection", (socket) => {
         const card = toLoc.bottom.splice(j, 1)[0]!;
         const insertAt = Math.min(Math.max(0, fromIndex), fromLoc.bottom.length);
         fromLoc.bottom.splice(insertAt, 0, card);
+      } else if (last.type === "remove" && last.data.type === "remove") {
+        const { cardId, from, fromIndex } = last.data;
+        const fromLoc = me.board.locations[from];
+        if (!fromLoc) return ack?.({ ok: false, error: "bad location" });
+
+        const top = me.zones.discard[me.zones.discard.length - 1];
+        if (!top || top.id !== cardId) {
+          return ack?.({ ok: false, error: "cannot undo: discard changed" });
+        }
+        const card = me.zones.discard.pop()!;
+        const insertAt = Math.min(Math.max(0, fromIndex), fromLoc.bottom.length);
+        fromLoc.bottom.splice(insertAt, 0, card);
       } else {
         return ack?.({ ok: false, error: "unsupported undo" });
       }
@@ -714,6 +735,41 @@ io.on("connection", (socket) => {
       });
 
       ack?.({ ok: true });
+    });
+    socket.on("game:removeCard", (payload: {cardId: string; from: number}, ack?: (res: {ok: boolean; error?: string}) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) {
+        return ack?.({ ok: false, error: "not your turn" });
+      }
+
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const from = Number(payload?.from);
+      if (!(from >= 0 && from < 4)) return ack?.({ ok: false, error: "bad location index" });
+
+      const fromLoc = me.board.locations[from];
+      if (!fromLoc) return ack?.({ ok: false, error: "bad location" });
+      const idx = fromLoc.bottom.findIndex(c => c.id === payload.cardId);
+      if (idx === -1) return ack?.({ ok: false, error: "card not on that location (bottom)" });
+
+      const card = fromLoc.bottom.splice(idx, 1)[0]!;
+      card.faceUp = true;
+      me.zones.discard.push(card);
+
+      ack?.({ ok: true });
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "remove",
+        data: { type: "remove", cardId: card.id, from: from as 0|1|2|3, fromIndex: idx },
+      });
     });
     
 
