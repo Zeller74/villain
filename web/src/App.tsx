@@ -351,6 +351,13 @@ export default function App() {
     });
   };
 
+  const changePower = (delta: number) => {
+    const s = sockRef.current!;
+    s.emit("power:change", { delta }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) setLastError(res?.error || "Power change failed");
+    });
+  };
+
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
   const inRoom = !!room;
   const iAmOwner = !!(room && myId && room.ownerId === myId);
@@ -621,7 +628,13 @@ export default function App() {
               <button onClick={cancelMove} style={{ marginLeft: "auto" }}>Cancel</button>
             </div>
           )}
-
+          <InfoBar
+            focusPlayer={focusPlayer ?? null}
+            myId={myId}
+            isMyTurn={isMyTurn}
+            phase={room?.game.phase ?? "lobby"}
+            onChangePower={changePower}
+          />
           {/* BOARD panel (dark) */}
           <div
             style={{
@@ -786,9 +799,6 @@ export default function App() {
                     Deck: {focusPlayer.counts?.deck ?? 0}
                   </span>
                   <span style={{ opacity: 0.8 }}>· Discard: {focusPlayer.counts?.discard ?? 0}</span>
-                  <span style={{ opacity: 0.8 }}>
-                    · Power: {typeof focusPlayer.power === "number" ? focusPlayer.power : "—"}
-                  </span>
 
                   {/* Controls appear ONLY when viewing self */}
                   {focusPlayerId === myId && (
@@ -861,15 +871,13 @@ export default function App() {
                             border: "1px solid #475569",
                             borderRadius: 8,
                             background:
-                              "repeating-linear-gradient(135deg, #0f172a, #0f172a 10px, #111827 10px, #111827 20px)",
+                              "repeating-linear-gradient(135deg, #626886ff, #061027ff 10px, #0e1b36ff 10px, #02050cff 20px)",
                             color: "#94a3b8",
                             display: "flex", alignItems: "center", justifyContent: "center",
                             textAlign: "center", fontSize: 12,
                             userSelect: "none",
                           }}
                         >
-                          {/* face-down look */}
-                          ■
                         </div>
                       ))
                     )
@@ -1090,8 +1098,6 @@ function DiscardPeek({
     </div>
   );
 }
-
-
 function DiscardModal({
   open,
   cards,
@@ -1200,6 +1206,62 @@ function DiscardModal({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+function InfoBar({
+  focusPlayer,
+  myId,
+  isMyTurn,
+  phase,
+  onChangePower,
+}: {
+  focusPlayer: Player | null;
+  myId: string | null;
+  isMyTurn: boolean;
+  phase: RoomState["game"]["phase"];
+  onChangePower: (delta: number) => void;
+}) {
+  if (!focusPlayer) return null;
+  const viewingSelf = focusPlayer.id === myId;
+  const deck = focusPlayer.counts?.deck ?? 0;
+  const discard = focusPlayer.counts?.discard ?? 0;
+  const power = typeof focusPlayer.power === "number" ? focusPlayer.power : 0;
+
+  return (
+    <div
+      style={{
+        border: "1px solid #334155",
+        borderRadius: 12,
+        padding: 10,
+        background: "#111827",
+        color: "#e5e7eb",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        marginBottom: 12,
+      }}
+    >
+      <strong style={{ whiteSpace: "nowrap" }}>
+        Viewing: {viewingSelf ? "You" : focusPlayer.name}
+      </strong>
+
+      <span style={{ opacity: 0.8 }}>· Power: {power}</span>
+
+      {viewingSelf && phase === "playing" && (
+        <div style={{ display: "flex", gap: 6, marginLeft: 6 }}>
+          <button onClick={() => onChangePower(-1)} disabled={!isMyTurn && power <= 0}>-1</button>
+          <button onClick={() => onChangePower(+1)}>+1</button>
+        </div>
+      )}
+
+      <span style={{ marginLeft: "auto", opacity: 0.8 }}>
+        {phase === "playing"
+          ? (isMyTurn ? "Your turn" : "Waiting…")
+          : phase === "lobby"
+          ? "Lobby"
+          : "Ended"}
+      </span>
     </div>
   );
 }

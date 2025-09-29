@@ -6,11 +6,11 @@ type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?:
 type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, Location]}
 type Card = {id: string; label: string; faceUp: boolean};
 type Zones = {deck: Card[]; hand: Card[]; discard: Card[]};
-type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board;};
+type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -24,7 +24,8 @@ type ActionEntry = {
     | { type: "move"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number }
     | { type: "remove"; cardId: string; from: 0|1|2|3; fromIndex: number }
     | { type: "reshuffle"; moved: number }
-    | { type: "retrieve"; cardId: string; fromIndex: number };
+    | { type: "retrieve"; cardId: string; fromIndex: number }
+    | { type: "power"; delta: number; prev: number; next: number };
   undone?: boolean;
   
 };
@@ -35,6 +36,7 @@ const io = new Server(PORT, {
     cors: {origin: "http://localhost:5173", credentials: true}
 });
 const rooms = new Map<string, Room>();
+const MAX_POWER = 50;
 
 function newRoomId(){
     return nanoid(6);
@@ -56,6 +58,7 @@ function emitRoomState(io: Server, roomId: string){
         name: p.name,
         ready: p.ready,
         characterId: p.characterId,
+        power: p.power,
         //public zones: counts only for hidden zones, full list for board
         counts: {
             deck: p.zones.deck.length,
@@ -262,6 +265,15 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} took a card from discard`,
     };
   }
+  if (e.type === "power" && e.data.type === "power") {
+    const d = e.data.delta;
+    const sign = d >= 0 ? "+" : "−";
+    const mag = Math.abs(d);
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "power",
+      text: `${name} ${sign}${mag} power (${e.data.prev} → ${e.data.next})`,
+    };
+  }
   //fallback
   return {
     id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: e.type,
@@ -325,7 +337,7 @@ io.on("connection", (socket) => {
         rooms.set(roomId, room);
 
         //join as player
-        const player: Player = { id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand:[], discard: []}, board: makeEmptyBoard() };
+        const player: Player = { id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand:[], discard: []}, board: makeEmptyBoard(), power: 0 };
         room.players.push(player);
         socket.join(roomId);
         socket.data.roomId = roomId;
@@ -351,7 +363,7 @@ io.on("connection", (socket) => {
         }
         //avoid dupes
         if (!room.players.some(p => p.id === socket.id)) {
-            room.players.push({id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand: [], discard: []}, board: makeEmptyBoard()});
+            room.players.push({id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand: [], discard: []}, board: makeEmptyBoard(), power: 0,});
             if (!room.game.activePlayerId && room.players.length > 0) {
                 const first = room.players[0]
                 if (first) room.game.activePlayerId = first.id;
@@ -688,6 +700,9 @@ io.on("connection", (socket) => {
       if (last.undone) return ack?.({ ok: false, error: "already undone" });
 
       const me = room.players.find(p => p.id === socket.id)!;
+      if (last.type === "power" && last.data.type === "power") {
+        return ack?.({ ok: false, error: "power cannot be undone" });
+      }
       if (last.type === "reshuffle" && last.data.type === "reshuffle") {
         return ack?.({ ok: false, error: "reshuffle cannot be undone" });
       }
@@ -866,7 +881,37 @@ io.on("connection", (socket) => {
 
       ack?.({ ok: true });
     });
+    socket.on("power:change", (payload: { delta?: number } | undefined, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
 
+      // self-only
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const raw = Number(payload?.delta ?? 0);
+      if (!Number.isFinite(raw) || raw === 0) return ack?.({ ok: false, error: "no change" });
+      const clampedDelta = Math.max(-10, Math.min(10, Math.round(raw))); // small safety
+      const prev = me.power ?? 0;
+      const next = Math.max(0, Math.min(MAX_POWER, prev + clampedDelta));
+      if (next === prev) return ack?.({ ok: false, error: "no change" });
+
+      me.power = next;
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "power",
+        data: { type: "power", delta: next - prev, prev, next },
+      });
+
+      ack?.({ ok: true });
+    });
     
 
 });
