@@ -17,7 +17,7 @@ type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: st
 type Card = {id: string; label: string; faceUp: boolean};
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
-type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove"; text: string;}
+type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle"; text: string;}
 
 
 export default function App() {
@@ -206,12 +206,6 @@ export default function App() {
     });
   };
 
-  const copyRoomId = async () => {
-    if(room?.roomId && navigator.clipboard){
-      await navigator.clipboard.writeText(room.roomId);
-    }
-  };
-
   const copyInviteLink = async () => {
     if (!room) return;
     // Build a clean invite URL with ?room=<id>
@@ -341,6 +335,12 @@ export default function App() {
     });
   };
 
+  const reshuffleDiscard = () => {
+    const s = sockRef.current!;
+    s.emit("game:reshuffleDeck", (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) setLastError(res?.error || "Reshuffle failed");
+    });
+  };
 
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
   const inRoom = !!room;
@@ -349,10 +349,10 @@ export default function App() {
   const me = room?.players.find(p => p.id === myId) || null;
   const everyoneReady = !!room && room.players.length >= 2 && room.players.every(p => p.ready);
   const focusPlayer = room?.players.find(p => p.id === focusPlayerId) || null;
-  const viewingSelf = !!(focusPlayer && myId && focusPlayer.id === myId);
   const myDeckCount = me?.counts?.deck ?? 0;
   const lastLog = logItems[0] ?? null;
   const canUndo = !!(lastLog && myId && lastLog.actorId === myId && lastLog.type !== "undo" && room?.game.phase === "playing");
+  const myDiscardCount = me?.counts?.discard ?? 0;
  
 
   return (
@@ -782,17 +782,24 @@ export default function App() {
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <strong>Your hand</strong>
-              <span style={{ marginLeft: 8, opacity: 0.8 }}>Deck: {myDeckCount}</span>
               <button onClick={drawOne} disabled={!isMyTurn}>Draw 1</button>
               <button
                 onClick={discardSelected}
                 disabled={!isMyTurn || selectedIds.size === 0}
-                title={selectedIds.size === 0 ? "Select a card in your hand" : "Discard the selected card"}>
-                Discard
+              >
+                Discard{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
               </button>
+              <button
+                onClick={reshuffleDiscard}
+                disabled={!isMyTurn || myDiscardCount === 0}
+                title={myDiscardCount === 0 ? "Discard is empty" : "Shuffle discard into deck"}
+              >
+                Shuffle Discard
+              </button>
+              <span style={{ marginLeft: 8, opacity: 0.8 }}>Deck: {myDeckCount}</span>
+              <span style={{ opacity: 0.8 }}>· Discard: {myDiscardCount}</span>
               {!isMyTurn && <span style={{ opacity: 0.7 }}>(not your turn)</span>}
             </div>
-
             <div
               style={{
                 display: "flex",

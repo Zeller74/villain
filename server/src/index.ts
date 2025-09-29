@@ -10,7 +10,7 @@ type Player = {id: string; name: string, ready: boolean; characterId: string | n
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -22,7 +22,8 @@ type ActionEntry = {
     | { type: "discard"; cardIds: string[] }
     | { type: "undo"; actionId: string }
     | { type: "move"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number }
-    | { type: "remove"; cardId: string; from: 0|1|2|3; fromIndex: number };
+    | { type: "remove"; cardId: string; from: 0|1|2|3; fromIndex: number }
+    | { type: "reshuffle"; moved: number};
   undone?: boolean;
   
 };
@@ -241,13 +242,19 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
     };
   }
   if (e.type === "remove" && e.data.type === "remove") {
-  const from = e.data.from + 1;
-  return {
-    id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "remove",
-    text: `${name} discarded a board card from L${from}`,
-  };
-}
-
+    const from = e.data.from + 1;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "remove",
+      text: `${name} discarded a board card from L${from}`,
+    };
+  }
+  if (e.type === "reshuffle" && e.data.type === "reshuffle") {
+    const n = e.data.moved;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "reshuffle",
+      text: `${name} reshuffled ${n} card${n===1 ? "" : "s"} into deck`,
+    };
+  }
 
   //fallback
   return {
@@ -272,6 +279,16 @@ function pushLog(io: Server, roomId: string, entry: ActionEntry) {
   if (room.log.length > 25) room.log.splice(0, room.log.length - 25);
   emitRoomLog(io, roomId);
 }
+
+function shuffleDiscardIntoDeck(p: Player): number {
+  const moved = p.zones.discard.length;
+  if (moved === 0) return 0;
+  const movedCards = p.zones.discard.splice(0).map(c => ({ ...c, faceUp: false }));
+  p.zones.deck.push(...movedCards);   // append to existing deck
+  shuffle(p.zones.deck);              // shuffle whole deck
+  return moved;
+}
+
 
 
 
@@ -665,7 +682,9 @@ io.on("connection", (socket) => {
       if (last.undone) return ack?.({ ok: false, error: "already undone" });
 
       const me = room.players.find(p => p.id === socket.id)!;
-
+      if (last.type === "reshuffle" && last.data.type === "reshuffle") {
+        return ack?.({ ok: false, error: "reshuffle cannot be undone" });
+      }
       if (last.type === "draw" && last.data.type === "draw") {
         const ids = last.data.cardIds;
         if (!ids.every(id => me.zones.hand.some(c => c.id === id))) {
@@ -771,6 +790,34 @@ io.on("connection", (socket) => {
         data: { type: "remove", cardId: card.id, from: from as 0|1|2|3, fromIndex: idx },
       });
     });
+    socket.on("game:reshuffleDeck", (ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) {
+        return ack?.({ ok: false, error: "not your turn" });
+      }
+
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const moved = shuffleDiscardIntoDeck(me);
+      if (moved === 0) return ack?.({ ok: false, error: "discard is empty" });
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "reshuffle",
+        data: { type: "reshuffle", moved },
+      });
+
+      ack?.({ ok: true });
+    });
+
     
 
 });
