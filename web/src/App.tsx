@@ -9,7 +9,7 @@ const CHARACTERS = [
 ];
 
 
-type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number}; discardTop: Card | null; board: Board};
+type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number}; discardTop: Card | null; board: Board; power?: number;};
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
@@ -773,76 +773,114 @@ export default function App() {
               color: "#e5e7eb",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <strong>Your hand</strong>
-              <button onClick={drawOne} disabled={!isMyTurn}>Draw 1</button>
-              <button
-                onClick={discardSelected}
-                disabled={!isMyTurn || selectedIds.size === 0}
-              >
-                Discard{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
-              </button>
-              <button
-                onClick={reshuffleDiscard}
-                disabled={!isMyTurn || myDiscardCount === 0}
-                title={myDiscardCount === 0 ? "Discard is empty" : "Shuffle discard into deck"}
-              >
-                Shuffle Discard
-              </button>
-              <span style={{ marginLeft: 8, opacity: 0.8 }}>Deck: {myDeckCount}</span>
-              <span style={{ opacity: 0.8 }}>· Discard: {myDiscardCount}</span>
-              {!isMyTurn && <span style={{ opacity: 0.7 }}>(not your turn)</span>}
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                marginTop: 8,
-                padding: 8,
-                border: "1px solid #475569",
-                borderRadius: 8,
-                overflowX: "auto",
-                background: "#0f172a",
-              }}
-            >
-              {myHand.length === 0 && <div style={{ opacity: 0.7 }}>Empty</div>}
-              {myHand.map((c) => {
-                const selected = selectedIds.has(c.id);
-                return (
-                  <div
-                    key={c.id}
-                    onClick={() => toggleSelect(c.id)}
-                    title={c.label}
-                    style={{
-                      minWidth: 88, height: 128, padding: 8,
-                      border: selected ? "2px solid #3b82f6" : "1px solid #64748b",
-                      borderRadius: 8,
-                      background: "#111827", color: "#f1f5f9",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      cursor: "pointer", userSelect: "none",
-                      textAlign: "center", fontSize: 12,
-                    }}
-                  >
-                    {c.label}
-                  </div>
-                );
-              })}
-            </div>
+            {focusPlayer ? (
+              <>
+                {/* Header: shows whose hand we’re viewing + counts for that player */}
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                  <strong>
+                    {focusPlayerId === myId ? "Your hand" : `${focusPlayer.name}'s hand`}
+                  </strong>
 
-            {/* (optional) keep button fallback for now */}
-            <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {[0,1,2,3].map(k => (
-                <button
-                  key={k}
-                  onClick={() => playTo(k)}
-                  disabled={selectedIds.size === 0 || !isMyTurn}
-                  title={selectedIds.size === 0 ? "Select exactly one card" : (!isMyTurn ? "Not your turn" : `Play to L${k+1}`)}
-                >
-                  Play to L{k+1}
-                </button>
-              ))}
-            </div>
+                  {/* Counts are always for the focus player */}
+                  <span style={{ marginLeft: 8, opacity: 0.8 }}>
+                    Deck: {focusPlayer.counts?.deck ?? 0}
+                  </span>
+                  <span style={{ opacity: 0.8 }}>· Discard: {focusPlayer.counts?.discard ?? 0}</span>
+                  <span style={{ opacity: 0.8 }}>
+                    · Power: {typeof focusPlayer.power === "number" ? focusPlayer.power : "—"}
+                  </span>
+
+                  {/* Controls appear ONLY when viewing self */}
+                  {focusPlayerId === myId && (
+                    <>
+                      <button onClick={drawOne} disabled={!isMyTurn} style={{ marginLeft: 8 }}>
+                        Draw 1
+                      </button>
+                      <button
+                        onClick={discardSelected}
+                        disabled={!isMyTurn || selectedIds.size === 0}
+                      >
+                        Discard{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+                      </button>
+                      <button
+                        onClick={reshuffleDiscard}
+                        disabled={!isMyTurn || (room?.players.find(p => p.id === myId)?.counts?.discard ?? 0) === 0}
+                        title="Shuffle your discard into your deck"
+                      >
+                        Shuffle Discard
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Cards area */}
+                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {focusPlayerId === myId ? (
+                    // YOU: render real cards with your existing selection UI
+                    myHand.length === 0 ? (
+                      <span style={{ opacity: 0.7, fontSize: 12 }}>Your hand is empty</span>
+                    ) : (
+                      myHand.map((c) => {
+                        const selected = selectedIds.has(c.id);
+                        return (
+                          <div
+                            key={c.id}
+                            onClick={() => toggleSelect(c.id)}
+                            title={c.label}
+                            style={{
+                              minWidth: 90, height: 130,
+                              padding: 8,
+                              border: selected ? "2px solid #3b82f6" : "1px solid #475569",
+                              borderRadius: 8,
+                              background: "#0b1220",
+                              color: "#e5e7eb",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              textAlign: "center", fontSize: 12,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {c.label}
+                          </div>
+                        );
+                      })
+                    )
+                  ) : (
+                    // SPECTATING: render concealed tiles equal to their hand count
+                    (focusPlayer.counts?.hand ?? 0) === 0 ? (
+                      <span style={{ opacity: 0.7, fontSize: 12 }}>
+                        {focusPlayer.name}'s hand is empty
+                      </span>
+                    ) : (
+                      Array.from({ length: focusPlayer.counts.hand }).map((_, idx) => (
+                        <div
+                          key={idx}
+                          title="Hidden card"
+                          style={{
+                            minWidth: 90, height: 130,
+                            padding: 8,
+                            border: "1px solid #475569",
+                            borderRadius: 8,
+                            background:
+                              "repeating-linear-gradient(135deg, #0f172a, #0f172a 10px, #111827 10px, #111827 20px)",
+                            color: "#94a3b8",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            textAlign: "center", fontSize: 12,
+                            userSelect: "none",
+                          }}
+                        >
+                          {/* face-down look */}
+                          ■
+                        </div>
+                      ))
+                    )
+                  )}
+                </div>
+              </>
+            ) : (
+              <span style={{ opacity: 0.7 }}>No player focused.</span>
+            )}
           </div>
+
           
           <DiscardModal
             open={showDiscard}
