@@ -17,7 +17,7 @@ type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: st
 type Card = {id: string; label: string; faceUp: boolean};
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
-type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle"; text: string;}
+type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve"; text: string;}
 
 
 export default function App() {
@@ -342,6 +342,15 @@ export default function App() {
     });
   };
 
+  const takeFromDiscard = (cardId: string) => {
+    const s = sockRef.current!;
+    s.emit("pile:takeFromDiscard", { cardId }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Take from discard failed");
+      // Optimistic update so the modal reflects instantly:
+      setDiscardCards(prev => prev.filter(c => c.id !== cardId));
+    });
+  };
+
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
   const inRoom = !!room;
   const iAmOwner = !!(room && myId && room.ownerId === myId);
@@ -353,6 +362,8 @@ export default function App() {
   const lastLog = logItems[0] ?? null;
   const canUndo = !!(lastLog && myId && lastLog.actorId === myId && lastLog.type !== "undo" && room?.game.phase === "playing");
   const myDiscardCount = me?.counts?.discard ?? 0;
+  const canTakeFromThisDiscard = !!(focusPlayer && myId && focusPlayer.id === myId && isMyTurn);
+
  
 
   return (
@@ -597,24 +608,6 @@ export default function App() {
               </button>
             ))}
           </div>
-            
-            {/* DEBUG: safe discard probe (remove later) */}
-            <div style={{ fontSize: 12, opacity: 0.8 }}>
-              {focusPlayer
-                ? (
-                  <>
-                    <span>focus: <b>{focusPlayer.name}</b></span>
-                    <span style={{ marginLeft: 12 }}>
-                      discard: {focusPlayer.counts?.discard ?? 0}
-                    </span>
-                    <span style={{ marginLeft: 12 }}>
-                      top: {focusPlayer.discardTop?.label ?? "—"}
-                    </span>
-                  </>
-                )
-                : <span>focus: (none yet)</span>
-              }
-            </div>
 
           {/*Move mode banner*/}
           {moving && (
@@ -854,8 +847,11 @@ export default function App() {
           <DiscardModal
             open={showDiscard}
             cards={discardCards}
+            canTake={canTakeFromThisDiscard}
+            onTakeCard={(card) => takeFromDiscard(card.id)}
             onClose={() => setShowDiscard(false)}
           />
+
 
 
           {/*chat*/}
@@ -1062,10 +1058,14 @@ function DiscardModal({
   open,
   cards,
   onClose,
+  canTake = false,
+  onTakeCard,
 }: {
   open: boolean;
   cards: Card[];
   onClose: () => void;
+  canTake?: boolean;
+  onTakeCard?: (card: Card) => void;
 }) {
   if (!open) return null;
   return (
@@ -1098,6 +1098,7 @@ function DiscardModal({
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <strong>Discard pile ({cards.length})</strong>
+          {canTake && <span style={{ fontSize: 12, opacity: 0.75 }}>Click a card to add to your hand</span>}
           <span style={{ marginLeft: "auto" }} />
           <button onClick={onClose}>Close</button>
         </div>
@@ -1116,7 +1117,11 @@ function DiscardModal({
             cards.map((c, idx) => (
               <div
                 key={c.id}
-                title={c.label}
+                onClick={() => { if (canTake && onTakeCard) onTakeCard(c); }}
+                title={
+                  canTake ? "Click to add this card to your hand"
+                          : c.label
+                }
                 style={{
                   position: "relative",
                   minWidth: 90,
@@ -1131,6 +1136,8 @@ function DiscardModal({
                   justifyContent: "center",
                   fontSize: 12,
                   textAlign: "center",
+                  cursor: canTake ? "pointer" : "default",
+                  opacity: canTake ? 1 : 0.9,
                 }}
               >
                 <div
@@ -1145,6 +1152,11 @@ function DiscardModal({
                   #{cards.length - idx}
                 </div>
                 {c.label}
+                {!canTake && (
+                  <div style={{ position: "absolute", bottom: 6, fontSize: 11, opacity: 0.6 }}>
+                    view only
+                  </div>
+                )}
               </div>
             ))
           )}

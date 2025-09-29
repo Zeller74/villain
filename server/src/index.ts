@@ -10,7 +10,7 @@ type Player = {id: string; name: string, ready: boolean; characterId: string | n
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -23,7 +23,8 @@ type ActionEntry = {
     | { type: "undo"; actionId: string }
     | { type: "move"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number }
     | { type: "remove"; cardId: string; from: 0|1|2|3; fromIndex: number }
-    | { type: "reshuffle"; moved: number};
+    | { type: "reshuffle"; moved: number }
+    | { type: "retrieve"; cardId: string; fromIndex: number };
   undone?: boolean;
   
 };
@@ -255,7 +256,12 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} reshuffled ${n} card${n===1 ? "" : "s"} into deck`,
     };
   }
-
+  if (e.type === "retrieve" && e.data.type === "retrieve") {
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "retrieve",
+      text: `${name} took a card from discard`,
+    };
+  }
   //fallback
   return {
     id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: e.type,
@@ -740,6 +746,14 @@ io.on("connection", (socket) => {
         const card = me.zones.discard.pop()!;
         const insertAt = Math.min(Math.max(0, fromIndex), fromLoc.bottom.length);
         fromLoc.bottom.splice(insertAt, 0, card);
+      } else if (last.type === "retrieve" && last.data.type === "retrieve") {
+        const { cardId, fromIndex } = last.data;
+        // Card must still be in hand to undo
+        const idx = me.zones.hand.findIndex(c => c.id === cardId);
+        if (idx === -1) return ack?.({ ok: false, error: "cannot undo: card moved from hand" });
+        const card = me.zones.hand.splice(idx, 1)[0]!;
+        const insertAt = Math.min(Math.max(0, fromIndex), me.zones.discard.length);
+        me.zones.discard.splice(insertAt, 0, card);
       } else {
         return ack?.({ ok: false, error: "unsupported undo" });
       }
@@ -813,6 +827,41 @@ io.on("connection", (socket) => {
         actorId: socket.id,
         type: "reshuffle",
         data: { type: "reshuffle", moved },
+      });
+
+      ack?.({ ok: true });
+    });
+    socket.on("pile:takeFromDiscard", (payload: {cardId: string}, ack?: (res: { ok: boolean; error?: string}) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+
+      // Only the active player can mutate, and only their own discard
+      if (room.game.activePlayerId !== socket.id) {
+        return ack?.({ ok: false, error: "not your turn" });
+      }
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const id = (payload?.cardId || "").trim();
+      if (!id) return ack?.({ ok: false, error: "missing cardId" });
+
+      const fromIndex = me.zones.discard.findIndex(c => c.id === id);
+      if (fromIndex === -1) return ack?.({ ok: false, error: "card not in your discard" });
+
+      const card = me.zones.discard.splice(fromIndex, 1)[0]!;
+      card.faceUp = true;                // known
+      me.zones.hand.push(card);
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "retrieve",
+        data: { type: "retrieve", cardId: card.id, fromIndex },
       });
 
       ack?.({ ok: true });
