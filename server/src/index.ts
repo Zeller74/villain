@@ -10,7 +10,7 @@ type Player = {id: string; name: string, ready: boolean; characterId: string | n
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -25,7 +25,10 @@ type ActionEntry = {
     | { type: "remove"; cardId: string; from: 0|1|2|3; fromIndex: number }
     | { type: "reshuffle"; moved: number }
     | { type: "retrieve"; cardId: string; fromIndex: number }
-    | { type: "power"; delta: number; prev: number; next: number };
+    | { type: "power"; delta: number; prev: number; next: number }
+    | { type: "pawn"; prev: 0|1|2|3; next: 0|1|2|3 }
+    | { type: "lock"; target: "location"; loc: 0|1|2|3; prev: boolean; next: boolean }
+    | { type: "lock"; target: "card"; loc: 0|1|2|3; row: "top"|"bottom"; cardId: string; prev: boolean; next: boolean};
   undone?: boolean;
   
 };
@@ -272,6 +275,12 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
     return {
       id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "power",
       text: `${name} ${sign}${mag} power (${e.data.prev} → ${e.data.next})`,
+    };
+  }
+  if (e.type === "pawn" && e.data.type === "pawn") {
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "pawn",
+      text: `${name} moved pawn to L${e.data.next + 1}`,
     };
   }
   //fallback
@@ -769,6 +778,10 @@ io.on("connection", (socket) => {
         const card = me.zones.hand.splice(idx, 1)[0]!;
         const insertAt = Math.min(Math.max(0, fromIndex), me.zones.discard.length);
         me.zones.discard.splice(insertAt, 0, card);
+      } else if (last.type === "pawn" && last.data.type === "pawn") {
+        const me = room.players.find(p => p.id === socket.id);
+        if (!me) return ack?.({ ok: false, error: "player not found" });
+        me.board.moverAt = last.data.prev;
       } else {
         return ack?.({ ok: false, error: "unsupported undo" });
       }
@@ -912,6 +925,44 @@ io.on("connection", (socket) => {
 
       ack?.({ ok: true });
     });
+    socket.on("pawn:set", (payload: { to: number }, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+
+      // self-only and (recommended) only on your turn
+      if (room.game.activePlayerId !== socket.id) {
+        return ack?.({ ok: false, error: "not your turn" });
+      }
+
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const raw = Number(payload?.to);
+      if (!Number.isInteger(raw) || raw < 0 || raw > 3) {
+        return ack?.({ ok: false, error: "bad location index" });
+      }
+      const to = raw as 0|1|2|3;
+
+      const prev = me.board.moverAt;
+      if (prev === to) return ack?.({ ok: false, error: "no change" });
+
+      me.board.moverAt = to;
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "pawn",
+        data: { type: "pawn", prev, next: to },
+      });
+
+      ack?.({ ok: true });
+    });
+
     
 
 });

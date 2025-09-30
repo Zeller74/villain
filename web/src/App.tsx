@@ -17,7 +17,7 @@ type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: st
 type Card = {id: string; label: string; faceUp: boolean};
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
-type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve"; text: string;}
+type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "pawn"; text: string;}
 
 
 export default function App() {
@@ -365,11 +365,10 @@ export default function App() {
   const me = room?.players.find(p => p.id === myId) || null;
   const everyoneReady = !!room && room.players.length >= 2 && room.players.every(p => p.ready);
   const focusPlayer = room?.players.find(p => p.id === focusPlayerId) || null;
-  const myDeckCount = me?.counts?.deck ?? 0;
   const lastLog = logItems[0] ?? null;
   const canUndo = !!(lastLog && myId && lastLog.actorId === myId && lastLog.type !== "undo" && room?.game.phase === "playing");
-  const myDiscardCount = me?.counts?.discard ?? 0;
   const canTakeFromThisDiscard = !!(focusPlayer && myId && focusPlayer.id === myId && isMyTurn);
+
 
  
 
@@ -663,6 +662,9 @@ export default function App() {
                 {focusPlayer.board.locations.map((loc, i) => {
                   const viewingSelf = focusPlayerId === myId;
                   const canDropHere = viewingSelf && isMyTurn;
+                  const isPawnHere = focusPlayer.board.moverAt === i;
+                  const canSetPawn = viewingSelf && isMyTurn;
+
                   return (
                     <div
                       key={loc.id}
@@ -673,8 +675,31 @@ export default function App() {
                         background: "#0f172a",
                       }}
                     >
-                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                        {loc.name} (L{i + 1}) {loc.locked ? "🔒" : ""}
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          marginBottom: 6,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          cursor: canSetPawn ? "pointer" : "default",
+                          color: isPawnHere ? "#facc15" : undefined, // highlight pawn row
+                        }}
+                        title={
+                          isPawnHere ? "Pawn is here"
+                          : canSetPawn ? "Click to move pawn here"
+                          : undefined
+                        }
+                        onClick={() => {
+                          if (!canSetPawn) return;
+                          sockRef.current!.emit("pawn:set", { to: i }, (res: { ok: boolean; error?: string }) => {
+                            if (!res?.ok) setLastError(res?.error || "Move pawn failed");
+                          });
+                        }}
+                      >
+                        {/* tiny pawn dot when active */}
+                        {isPawnHere && <span style={{ fontSize: 12 }}>●</span>}
+                        <span>{loc.name}{loc.locked ? "🔒" : ""}</span>
                       </div>
 
                       {/* Top (public) */}
@@ -1224,8 +1249,6 @@ function InfoBar({
 }) {
   if (!focusPlayer) return null;
   const viewingSelf = focusPlayer.id === myId;
-  const deck = focusPlayer.counts?.deck ?? 0;
-  const discard = focusPlayer.counts?.discard ?? 0;
   const power = typeof focusPlayer.power === "number" ? focusPlayer.power : 0;
 
   return (
@@ -1243,10 +1266,11 @@ function InfoBar({
       }}
     >
       <strong style={{ whiteSpace: "nowrap" }}>
-        Viewing: {viewingSelf ? "You" : focusPlayer.name}
+         {viewingSelf ? "" : "Viewing: " + focusPlayer.name}
       </strong>
-
-      <span style={{ opacity: 0.8 }}>· Power: {power}</span>
+      <span style={{ opacity: 0.8 }}>Pawn: L{(focusPlayer.board.moverAt ?? 0) + 1}</span>
+      <span style={{ opacity: 0.8 }}>Power: {power}</span>
+      
 
       {viewingSelf && phase === "playing" && (
         <div style={{ display: "flex", gap: 6, marginLeft: 6 }}>
