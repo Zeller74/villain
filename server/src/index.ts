@@ -4,7 +4,7 @@ import { measureMemory } from "vm";
 
 type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?: boolean};
 type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, Location]}
-type Card = {id: string; label: string; faceUp: boolean};
+type Card = {id: string; label: string; faceUp: boolean; locked?: boolean};
 type Zones = {deck: Card[]; hand: Card[]; discard: Card[]};
 type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
@@ -282,6 +282,17 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "pawn",
       text: `${name} moved pawn to L${e.data.next + 1}`,
     };
+  }
+  if (e.type === "lock" && e.data.type === "lock") {
+    if (e.data.target === "location") {
+      const verb = e.data.next ? "locked" : "unlocked";
+      return { id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "lock",
+        text: `${name} ${verb} L${e.data.loc + 1}` };
+    } else {
+      const verb = e.data.next ? "locked" : "unlocked";
+      return { id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "lock",
+        text: `${name} ${verb} a card on L${e.data.loc + 1}` };
+    }
   }
   //fallback
   return {
@@ -571,13 +582,13 @@ io.on("connection", (socket) => {
         }
         const me = room.players.find(p => p.id === socket.id);
         if (!me) return ack?.({ ok: false, error: "player not found" });
-
         const k = Number(payload?.locationIndex);
         if (!(k >= 0 && k < 4)) return ack?.({ ok: false, error: "bad location index" });
 
         const idx = me.zones.hand.findIndex(c => c.id === payload.cardId);
         if (idx === -1) return ack?.({ ok: false, error: "card not in hand" });
-    
+        
+
         //move card from hand to board
         const card = me.zones.hand.splice(idx, 1)[0]!;
         card.faceUp = true;
@@ -585,6 +596,7 @@ io.on("connection", (socket) => {
         const kk = (k as 0 | 1 | 2 | 3);
         const loc = me.board.locations[kk];
         if(!loc) return ack?.({ok: false, error: "bad location"});
+        if (loc.locked) return ack?.({ ok: false, error: "location is locked" });
         loc.bottom.push(card);
 
         ack?.({ ok: true });
@@ -672,7 +684,7 @@ io.on("connection", (socket) => {
         return ack?.({ ok: false, error: "bad location index" });
       }
       if (from === to) {
-        return ack?.({ ok: false, error: "moving within same location not supported yet" });
+        return ack?.({ ok: false, error: "moving within same location not supported" });
       }
 
       const fromLoc = me.board.locations[from];
@@ -681,6 +693,10 @@ io.on("connection", (socket) => {
 
       const idx = fromLoc.bottom.findIndex(c => c.id === payload.cardId);
       if (idx === -1) return ack?.({ ok: false, error: "card not in source location (bottom)" });
+      const srcCard = fromLoc.bottom[idx];
+      if (srcCard?.locked) return ack?.({ ok: false, error: "card is locked" });
+      if (toLoc.locked)    return ack?.({ ok: false, error: "destination locked" });
+
 
       const card = fromLoc.bottom.splice(idx, 1)[0]!;
       const toIndex = toLoc.bottom.length; // push to end for now
@@ -782,6 +798,38 @@ io.on("connection", (socket) => {
         const me = room.players.find(p => p.id === socket.id);
         if (!me) return ack?.({ ok: false, error: "player not found" });
         me.board.moverAt = last.data.prev;
+      } else if (last.type === "lock" && last.data.type === "lock") {
+        const me = room.players.find(p => p.id === socket.id);
+        if (!me) return ack?.({ ok: false, error: "player not found" });
+
+        const d = last.data; // narrow once
+
+        if (d.target === "location") {
+          const i = d.loc as 0 | 1 | 2 | 3;
+          const loc = me.board.locations[i];
+          if (!loc) return ack?.({ ok: false, error: "bad location" });
+          loc.locked = d.prev;
+        } else if (d.target === "card") {
+          const i = d.loc as 0 | 1 | 2 | 3;
+          const loc = me.board.locations[i];
+          if (!loc) return ack?.({ ok: false, error: "bad location" });
+          const list = d.row === "top" ? loc.top : loc.bottom;
+          const j = list.findIndex(c => c.id === d.cardId);
+          if (j === -1) return ack?.({ ok: false, error: "card not found" });
+          list[j]!.locked = d.prev;
+        } else {
+          return ack?.({ ok: false, error: "bad lock payload" });
+        }
+
+        emitRoomState(io, roomId);
+        pushLog(io, roomId, {
+          id: nanoid(8),
+          ts: Date.now(),
+          actorId: socket.id,
+          type: "undo",
+          data: { type: "undo", actionId: last.id },
+        });
+        return ack?.({ ok: true });
       } else {
         return ack?.({ ok: false, error: "unsupported undo" });
       }
@@ -817,7 +865,8 @@ io.on("connection", (socket) => {
       if (!fromLoc) return ack?.({ ok: false, error: "bad location" });
       const idx = fromLoc.bottom.findIndex(c => c.id === payload.cardId);
       if (idx === -1) return ack?.({ ok: false, error: "card not on that location (bottom)" });
-
+      const cand = fromLoc.bottom[idx];
+      if (cand?.locked) return ack?.({ ok: false, error: "card is locked" });
       const card = fromLoc.bottom.splice(idx, 1)[0]!;
       card.faceUp = true;
       me.zones.discard.push(card);
@@ -945,6 +994,7 @@ io.on("connection", (socket) => {
         return ack?.({ ok: false, error: "bad location index" });
       }
       const to = raw as 0|1|2|3;
+      if (me.board.locations[to].locked) return ack?.({ ok: false, error: "location is locked" });
 
       const prev = me.board.moverAt;
       if (prev === to) return ack?.({ ok: false, error: "no change" });
@@ -960,6 +1010,81 @@ io.on("connection", (socket) => {
         data: { type: "pawn", prev, next: to },
       });
 
+      ack?.({ ok: true });
+    });
+    socket.on("board:toggleLocationLock", (payload: { index: number; locked?: boolean }, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+
+      // self-only (lock your own board)
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const raw = Number(payload?.index);
+      if (!Number.isInteger(raw) || raw < 0 || raw > 3) return ack?.({ ok: false, error: "bad location index" });
+      const locIdx = raw as 0|1|2|3;
+
+      const loc = me.board.locations[locIdx];
+      if (!loc) return ack?.({ ok: false, error: "bad location" });
+
+      const prev = !!loc.locked;
+      const next = typeof payload?.locked === "boolean" ? !!payload.locked : !prev;
+      if (next === prev) return ack?.({ ok: false, error: "no change" });
+
+      loc.locked = next;
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8), ts: Date.now(), actorId: socket.id, type: "lock",
+        data: { type: "lock", target: "location", loc: locIdx, prev, next },
+      });
+      ack?.({ ok: true });
+    });
+    socket.on("board:toggleCardLock", (payload: { cardId: string; locked?: boolean }, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+
+      // self-only (lock cards on your own board)
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const id = (payload?.cardId || "").trim();
+      if (!id) return ack?.({ ok: false, error: "missing cardId" });
+
+      let locIdx: 0|1|2|3 | null = null;
+      let row: "top" | "bottom" | null = null;
+      let idx = -1;
+
+      for (let i=0; i<4; i++) {
+        const ii = i as 0 | 1 | 2 | 3;
+        const loc = me.board.locations[ii];
+        if (!loc) continue;
+        const t = loc.top.findIndex(c => c.id === id);
+        if (t !== -1) { locIdx = i as 0|1|2|3; row = "top"; idx = t; break; }
+        const b = loc.bottom.findIndex(c => c.id === id);
+        if (b !== -1) { locIdx = i as 0|1|2|3; row = "bottom"; idx = b; break; }
+      }
+      if (locIdx === null || row === null) return ack?.({ ok: false, error: "card not on your board" });
+
+      const list = row === "top" ? me.board.locations[locIdx].top : me.board.locations[locIdx].bottom;
+      const card = list[idx]!;
+      const prev = !!card.locked;
+      const next = typeof payload?.locked === "boolean" ? !!payload.locked : !prev;
+      if (next === prev) return ack?.({ ok: false, error: "no change" });
+
+      card.locked = next;
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8), ts: Date.now(), actorId: socket.id, type: "lock",
+        data: { type: "lock", target: "card", loc: locIdx, row, cardId: id, prev, next },
+      });
       ack?.({ ok: true });
     });
 

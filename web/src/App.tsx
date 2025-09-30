@@ -14,7 +14,7 @@ type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlaye
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string};
-type Card = {id: string; label: string; faceUp: boolean};
+type Card = {id: string; label: string; faceUp: boolean; locked?: boolean};
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "pawn"; text: string;}
@@ -664,6 +664,7 @@ export default function App() {
                   const canDropHere = viewingSelf && isMyTurn;
                   const isPawnHere = focusPlayer.board.moverAt === i;
                   const canSetPawn = viewingSelf && isMyTurn;
+                  const canToggleLocLock = viewingSelf && isMyTurn;
 
                   return (
                     <div
@@ -700,6 +701,27 @@ export default function App() {
                         {/* tiny pawn dot when active */}
                         {isPawnHere && <span style={{ fontSize: 12 }}>●</span>}
                         <span>{loc.name}{loc.locked ? "🔒" : ""}</span>
+                        {canToggleLocLock && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              sockRef.current!.emit("board:toggleLocationLock", { index: i, locked: !loc.locked }, (res: { ok: boolean; error?: string }) => {
+                                if (!res?.ok) setLastError(res?.error || "Toggle lock failed");
+                              });
+                            }}
+                            title={loc.locked ? "Unlock this location" : "Lock this location"}
+                            style={{
+                              marginLeft: "auto",
+                              fontSize: 12, padding: "2px 6px",
+                              borderRadius: 6, border: "1px solid #334155",
+                              background: loc.locked ? "#7f1d1d" : "#1e293b",
+                              color: "#e5e7eb",
+                              cursor: "pointer",
+                            }}
+                          >
+                            {loc.locked ? "Unlock" : "Lock"}
+                          </button>
+                        )}
                       </div>
 
                       {/* Top (public) */}
@@ -750,13 +772,11 @@ export default function App() {
                           minHeight: 88,
                         }}
                         title={
-                          canDropHere
-                            ? (moving
-                                ? "Click a location to drop the moving card"
-                                : (selectedIds.size === 1
-                                    ? "Click to play the selected card here"
-                                    : "Select exactly one card"))
-                            : "You can only play on your own board during your turn"
+                          !viewingSelf ? "You can only play on your own board"
+                          : !isMyTurn ? "Not your turn"
+                          : loc.locked ? "Location is locked"
+                          : (moving ? "Click to drop the moving card" :
+                            selectedIds.size === 1 ? "Click to play the selected card here" : "Select exactly one card")
                         }
                       >
                         <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>Bottom</div>
@@ -772,6 +792,7 @@ export default function App() {
                                     //don't trigger play
                                     e.stopPropagation();               
                                     if (!isMyTurn || focusPlayerId !== myId) return;
+                                    if (c.locked) { setLastError("Card is locked"); return; }
                                     startMove(c.id, i, c.label);
                                   }}
                                   title={c.label}
@@ -784,8 +805,30 @@ export default function App() {
                                     display: "flex", alignItems: "center", justifyContent: "center",
                                     fontSize: 11, padding: 4, textAlign: "center",
                                     cursor: (isMyTurn && focusPlayerId === myId) ? "pointer" : "default",
+                                    opacity: c.locked ? 0.6 : 1,
                                   }}
                                 >
+                                  {viewingSelf && isMyTurn && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        sockRef.current!.emit("board:toggleCardLock", { cardId: c.id, locked: !c.locked }, (res: { ok: boolean; error?: string }) => {
+                                          if (!res?.ok) setLastError(res?.error || "Toggle card lock failed");
+                                        });
+                                      }}
+                                      title={c.locked ? "Unlock card" : "Lock card"}
+                                      style={{
+                                        position: "absolute", top: 2, left: 2, zIndex: 5,
+                                        fontSize: 10, padding: "1px 4px",
+                                        borderRadius: 6, border: "1px solid #334155",
+                                        background: c.locked ? "#7f1d1d" : "#1e293b",
+                                        color: "#e5e7eb",
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      {c.locked ? "🔒" : "🔓"}
+                                    </button>
+                                  )}
                                   {c.label}
                                 </div>
                               </div>
