@@ -4,13 +4,13 @@ import { measureMemory } from "vm";
 
 type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?: boolean};
 type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, Location]}
-type Card = {id: string; label: string; faceUp: boolean; locked?: boolean};
+type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; strength?: number;};
 type Zones = {deck: Card[]; hand: Card[]; discard: Card[]};
 type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -28,7 +28,8 @@ type ActionEntry = {
     | { type: "power"; delta: number; prev: number; next: number }
     | { type: "pawn"; prev: 0|1|2|3; next: 0|1|2|3 }
     | { type: "lock"; target: "location"; loc: 0|1|2|3; prev: boolean; next: boolean }
-    | { type: "lock"; target: "card"; loc: 0|1|2|3; row: "top"|"bottom"; cardId: string; prev: boolean; next: boolean};
+    | { type: "lock"; target: "card"; loc: 0|1|2|3; row: "top"|"bottom"; cardId: string; prev: boolean; next: boolean}
+    | { type: "strength"; cardId: string; loc: 0|1|2|3; row: "top"|"bottom"; prev: number; next: number; delta: number};
   undone?: boolean;
   
 };
@@ -293,6 +294,16 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       return { id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "lock",
         text: `${name} ${verb} a card on L${e.data.loc + 1}` };
     }
+  }
+  if (e.type === "strength" && e.data.type === "strength") {
+    const d = e.data;
+    const sign = d.delta >= 0 ? "+" : "−";
+    const mag = Math.abs(d.delta);
+    const now = d.next >= 0 ? `+${d.next}` : String(d.next);
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "strength",
+      text: `${name} ${sign}${mag} strength on L${d.loc + 1} (now ${now})`,
+    };
   }
   //fallback
   return {
@@ -820,15 +831,20 @@ io.on("connection", (socket) => {
         } else {
           return ack?.({ ok: false, error: "bad lock payload" });
         }
+      } else if (last.type === "strength" && last.data.type === "strength") {
+        const me = room.players.find(p => p.id === socket.id);
+        if (!me) return ack?.({ ok: false, error: "player not found" });
 
-        emitRoomState(io, roomId);
-        pushLog(io, roomId, {
-          id: nanoid(8),
-          ts: Date.now(),
-          actorId: socket.id,
-          type: "undo",
-          data: { type: "undo", actionId: last.id },
-        });
+        const d = last.data;
+        const i = d.loc as 0|1|2|3;
+        const loc = me.board.locations[i];
+        if (!loc) return ack?.({ ok: false, error: "bad location" });
+
+        const list = d.row === "top" ? loc.top : loc.bottom;
+        const j = list.findIndex(c => c.id === d.cardId);
+        if (j === -1) return ack?.({ ok: false, error: "card not found" });
+
+        list[j]!.strength = d.prev;
         return ack?.({ ok: true });
       } else {
         return ack?.({ ok: false, error: "unsupported undo" });
@@ -1084,6 +1100,60 @@ io.on("connection", (socket) => {
       pushLog(io, roomId, {
         id: nanoid(8), ts: Date.now(), actorId: socket.id, type: "lock",
         data: { type: "lock", target: "card", loc: locIdx, row, cardId: id, prev, next },
+      });
+      ack?.({ ok: true });
+    });
+    socket.on("card:deltaStrength", (payload: {cardId?: string; delta?: number} | undefined, ack?: (res: {ok: boolean; error?: string}) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+
+      // Self-only (adjust your own board), allowed any time during playing phase
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const id = (payload?.cardId || "").trim();
+      const raw = Number(payload?.delta);
+      if (!id || !Number.isFinite(raw) || raw === 0) {
+        return ack?.({ ok: false, error: "bad input" });
+      }
+      const delta = Math.max(-5, Math.min(5, Math.round(raw))); // small safety window
+
+      // Find card on your board (top or bottom)
+      let locIdx: 0|1|2|3 | null = null;
+      let row: "top" | "bottom" | null = null;
+      let idx = -1;
+
+      for (let i = 0; i < 4; i++) {
+        const ii = i as 0|1|2|3;
+        const loc = me.board.locations[ii];
+        if (!loc) continue;
+        const t = loc.top.findIndex(c => c.id === id);
+        if (t !== -1) { locIdx = ii; row = "top"; idx = t; break; }
+        const b = loc.bottom.findIndex(c => c.id === id);
+        if (b !== -1) { locIdx = ii; row = "bottom"; idx = b; break; }
+      }
+      if (locIdx === null || row === null) return ack?.({ ok: false, error: "card not on your board" });
+
+      const list = row === "top" ? me.board.locations[locIdx]!.top : me.board.locations[locIdx]!.bottom;
+      const card = list[idx]!;
+      if (card.locked) return ack?.({ ok: false, error: "card is locked" });
+
+      const prev = card.strength ?? 0;
+      const next = Math.max(-20, Math.min(20, prev + delta)); // clamp
+      if (next === prev) return ack?.({ ok: false, error: "no change" });
+
+      card.strength = next;
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "strength",
+        data: { type: "strength", cardId: card.id, loc: locIdx, row, prev, next, delta: next - prev },
       });
       ack?.({ ok: true });
     });

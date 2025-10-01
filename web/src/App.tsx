@@ -14,10 +14,10 @@ type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlaye
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string};
-type Card = {id: string; label: string; faceUp: boolean; locked?: boolean};
+type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; strength?: number};
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
-type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "pawn"; text: string;}
+type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "pawn" | "strength"; text: string;}
 
 
 export default function App() {
@@ -357,6 +357,14 @@ export default function App() {
       if (!res?.ok) setLastError(res?.error || "Power change failed");
     });
   };
+
+  const changeCardStrength = (cardId: string, delta: number) => {
+    const s = sockRef.current!;
+    s.emit("card:deltaStrength", { cardId, delta }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) setLastError(res?.error || "Strength change failed");
+    });
+  };
+
 
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
   const inRoom = !!room;
@@ -797,7 +805,7 @@ export default function App() {
                                   }}
                                   title={c.label}
                                   style={{
-                                    minWidth: 54, height: 78,
+                                    minWidth: 80, height: 120,
                                     border: "1px solid #64748b",
                                     borderRadius: 6,
                                     background: "#0b1220",
@@ -828,6 +836,42 @@ export default function App() {
                                     >
                                       {c.locked ? "🔒" : "🔓"}
                                     </button>
+                                  )}
+                                  {typeof c.strength === "number" && c.strength !== 0 && (
+                                    <div
+                                      style={{
+                                        position: "absolute",
+                                        bottom: 2,
+                                        left: 2,
+                                        zIndex: 4,
+                                        fontSize: 11,
+                                        lineHeight: 1,
+                                        padding: "0 6px",
+                                        borderRadius: 6,
+                                        border: "1px solid #334155",
+                                        background: "#1e293b",
+                                        color: (c.strength ?? 0) < 0 ? "#fca5a5" : "#a7f3d0",
+                                        whiteSpace: "nowrap",
+                                        fontVariantNumeric: "tabular-nums",
+                                      }}
+                                      title={`Strength ${c.strength > 0 ? `+${c.strength}` : `${c.strength}`}`}
+                                    >
+                                      {c.strength > 0 ? `+${c.strength}` : `${c.strength}`}
+                                    </div>
+                                  )}
+                                  {focusPlayerId === myId && room?.game.phase === "playing" && !c.locked && (
+                                    <div style={{ position: "absolute", bottom: 2, right: 2, display: "flex", gap: 4, zIndex: 5 }}>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); changeCardStrength(c.id, -1); }}
+                                        title="−1 strength"
+                                        style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb" }}
+                                      >−</button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); changeCardStrength(c.id, +1); }}
+                                        title="+1 strength"
+                                        style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb" }}
+                                      >+</button>
+                                    </div>
                                   )}
                                   {c.label}
                                 </div>
