@@ -1509,7 +1509,7 @@ function FateBar({
         onClick={() => onOpenFateDiscard(focusPlayer.id)}
         title="View fate discard"
       >
-        View Discard
+        Open Discard
       </button>
 
       {/* Reshuffle (for the focused player) */}
