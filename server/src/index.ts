@@ -5,18 +5,19 @@ import { measureMemory } from "vm";
 type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?: boolean};
 type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, Location]}
 type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; strength?: number;};
-type Zones = {deck: Card[]; hand: Card[]; discard: Card[]};
+type Zones = {deck: Card[]; hand: Card[]; discard: Card[]; fateDeck: Card[]; fateDiscard: Card[]};
 type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle";
 type ActionEntry = {
   id: string;
   ts: number;
   actorId: string;
   type: ActionType;
   data:
+    | { type: "fate_reshuffle"; targetId: string; moved: number}
     | { type: "draw"; cardIds: string[] }
     | { type: "play"; cardId: string; locationIndex: 0|1|2|3 }
     | { type: "discard"; cardIds: string[] }
@@ -31,7 +32,6 @@ type ActionEntry = {
     | { type: "lock"; target: "card"; loc: 0|1|2|3; row: "top"|"bottom"; cardId: string; prev: boolean; next: boolean}
     | { type: "strength"; cardId: string; loc: 0|1|2|3; row: "top"|"bottom"; prev: number; next: number; delta: number};
   undone?: boolean;
-  
 };
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: ActionType | "undo"; text: string}
 
@@ -68,6 +68,8 @@ function emitRoomState(io: Server, roomId: string){
             deck: p.zones.deck.length,
             hand: p.zones.hand.length,
             discard: p.zones.discard.length,
+            fateDeck: p.zones.fateDeck.length,
+            fateDiscard: p.zones.fateDiscard.length,
         },
         discardTop: p.zones.discard.length ? p.zones.discard[p.zones.discard.length - 1] : null,
         board: {
@@ -189,6 +191,17 @@ function makeStarterDeck(ownerName: string, n = 15): Card[] {
   return cards;
 }
 
+function seedFateDeckFor(p: Player) {
+  const cards: Card[] = Array.from({ length: 12 }, (_, i) => ({
+    id: nanoid(8),
+    label: `Fate Card ${i + 1}`,
+    faceUp: true,       // revealed when drawn; can stay true
+  }));
+  shuffle(cards);
+  p.zones.fateDeck = cards;
+  p.zones.fateDiscard = [];
+}
+
 function reshuffleFromDiscardIntoDeck(p: Player): boolean {
   if (p.zones.deck.length > 0) return false;
   if (p.zones.discard.length === 0) return false;
@@ -305,6 +318,22 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} ${sign}${mag} strength on L${d.loc + 1} (now ${now})`,
     };
   }
+  if (e.type === "fate_reshuffle" && e.data.type === "fate_reshuffle") {
+    const d = e.data as Extract<ActionEntry["data"], { type: "fate_reshuffle" }>;
+    const targetId = d.targetId;
+
+    // Old-school loop avoids any union confusion inside a callback
+    let targetName = "player";
+    for (const p of room.players) {
+      if (p.id === targetId) { targetName = p.name; break; }
+    }
+
+    const n = d.moved;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "fate_reshuffle",
+      text: `${name} reshuffled ${n} fate card${n === 1 ? "" : "s"} for ${targetName}`,
+    };
+  }
   //fallback
   return {
     id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: e.type,
@@ -338,7 +367,14 @@ function shuffleDiscardIntoDeck(p: Player): number {
   return moved;
 }
 
-
+function shuffleFateDiscardIntoDeck(p: Player): number {
+  const moved = p.zones.fateDiscard.length;
+  if (moved === 0) return 0;
+  const movedCards = p.zones.fateDiscard.splice(0).map(c => ({ ...c, faceUp: true }));
+  p.zones.fateDeck.push(...movedCards);
+  shuffle(p.zones.fateDeck);
+  return moved;
+}
 
 
 io.on("connection", (socket) => {
@@ -368,7 +404,7 @@ io.on("connection", (socket) => {
         rooms.set(roomId, room);
 
         //join as player
-        const player: Player = { id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand:[], discard: []}, board: makeEmptyBoard(), power: 0 };
+        const player: Player = { id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand:[], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0 };
         room.players.push(player);
         socket.join(roomId);
         socket.data.roomId = roomId;
@@ -394,7 +430,7 @@ io.on("connection", (socket) => {
         }
         //avoid dupes
         if (!room.players.some(p => p.id === socket.id)) {
-            room.players.push({id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand: [], discard: []}, board: makeEmptyBoard(), power: 0,});
+            room.players.push({id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand: [], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0,});
             if (!room.game.activePlayerId && room.players.length > 0) {
                 const first = room.players[0]
                 if (first) room.game.activePlayerId = first.id;
@@ -499,6 +535,7 @@ io.on("connection", (socket) => {
             p.zones.deck = makeStarterDeck(p.name, 15);
             p.zones.hand = [];
             p.zones.discard = [];
+            seedFateDeckFor(p);
             // reset / label board for the run (keeps ids stable)
             p.board = makeEmptyBoard();
             // if (p.characterId === 'warlord') { p.board.locations[0].name = 'camp'; ... }
@@ -1157,8 +1194,36 @@ io.on("connection", (socket) => {
       });
       ack?.({ ok: true });
     });
+    socket.on("fate:reshuffleDeck", (payload: { playerId: string } | undefined, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
 
-    
+      // Only the active player can trigger this (covers both fater and target on their turn)
+      if (room.game.activePlayerId !== socket.id) {
+        return ack?.({ ok: false, error: "not your turn" });
+      }
+
+      const pid = (payload?.playerId || "").trim();
+      const target = room.players.find(p => p.id === pid);
+      if (!target) return ack?.({ ok: false, error: "player not found" });
+
+      const moved = shuffleFateDiscardIntoDeck(target);
+      if (moved === 0) return ack?.({ ok: false, error: "fate discard is empty" });
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "fate_reshuffle",
+        data: { type: "fate_reshuffle", targetId: target.id, moved },
+      });
+
+      ack?.({ ok: true });
+    });
 
 });
 

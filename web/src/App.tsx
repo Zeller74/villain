@@ -9,7 +9,7 @@ const CHARACTERS = [
 ];
 
 
-type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number}; discardTop: Card | null; board: Board; power?: number;};
+type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number; fateDeck?: number; fateDiscard?: number}; discardTop: Card | null; board: Board; power?: number;};
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
@@ -17,7 +17,7 @@ type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: st
 type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; strength?: number};
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
-type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "pawn" | "strength"; text: string;}
+type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "pawn" | "strength" | "fate_reshuffle"; text: string;}
 
 
 export default function App() {
@@ -364,6 +364,22 @@ export default function App() {
       if (!res?.ok) setLastError(res?.error || "Strength change failed");
     });
   };
+
+  const startFateFor = (targetId: string) => {
+    setLastError("Fate start not wired yet — next step"); // TEMP: will replace with socket call
+  };
+
+  const reshuffleFateDiscardFor = (playerId: string) => {
+    const s = sockRef.current!;
+    s.emit("fate:reshuffleDeck", { playerId }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) setLastError(res?.error || "Fate reshuffle failed");
+    });
+  };
+
+  const openFateDiscardFor = (playerId: string) => {
+    setLastError("Fate discard viewer not wired yet — next step"); // TEMP
+  };
+
 
 
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
@@ -887,6 +903,17 @@ export default function App() {
               </>
             )}
           </div>
+          
+          <FateBar
+            focusPlayer={focusPlayer ?? null}
+            myId={myId}
+            isMyTurn={isMyTurn}
+            phase={room?.game.phase ?? "lobby"}
+            players={room?.players ?? []}
+            onStartFate={startFateFor}
+            onReshuffleFate={reshuffleFateDiscardFor}
+            onOpenFateDiscard={openFateDiscardFor}
+          />
 
           {/* HAND panel (dark) */}
           <div
@@ -1365,8 +1392,136 @@ function InfoBar({
           <button onClick={() => onChangePower(+1)}>+1</button>
         </div>
       )}
-
       <span style={{ marginLeft: "auto", opacity: 0.8 }}>
+        {phase === "playing"
+          ? (isMyTurn ? "Your turn" : "Waiting…")
+          : phase === "lobby"
+          ? "Lobby"
+          : "Ended"}
+      </span>
+    </div>
+  );
+}
+function FateBar({
+  focusPlayer,
+  myId,
+  isMyTurn,
+  phase,
+  players,
+  onStartFate,        // choose a target (self allowed)
+  onReshuffleFate,    // reshuffle fate discard → fate deck (for a given player)
+  onOpenFateDiscard,  // open fate discard viewer (for a given player)
+}: {
+  focusPlayer: Player | null;
+  myId: string | null;
+  isMyTurn: boolean;
+  phase: "lobby" | "playing" | "ended";
+  players: Player[];
+  onStartFate: (targetId: string) => void;
+  onReshuffleFate: (playerId: string) => void;
+  onOpenFateDiscard: (playerId: string) => void;
+}) {
+  if (!focusPlayer) return null;
+
+  const viewingSelf = focusPlayer.id === myId;
+  const fateDeck   = focusPlayer.counts?.fateDeck    ?? 0;
+  const fateDisc   = focusPlayer.counts?.fateDiscard ?? 0;
+
+  // local UI for the target picker
+  const [pickOpen, setPickOpen] = useState(false);
+
+  const canAct = phase === "playing" && isMyTurn;
+
+  return (
+    <div
+      style={{
+        border: "1px solid #334155",
+        borderRadius: 12,
+        padding: 10,
+        background: "#0b1220",
+        color: "#e5e7eb",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        marginBottom: 12,
+      }}
+    >
+      <strong>Fate</strong>
+
+      {/* Counts for the FOCUSED player */}
+      <span style={{ opacity: 0.85 }}>Deck: {fateDeck}</span>
+      <span style={{ opacity: 0.85 }}>· Discard: {fateDisc}</span>
+      {!viewingSelf && (
+        <span style={{ opacity: 0.6 }}>
+          · Target: {focusPlayer.name}
+        </span>
+      )}
+
+      {/* Start Fate (self or others) */}
+      <div style={{ position: "relative" }}>
+        <button
+          onClick={() => setPickOpen(v => !v)}
+          disabled={!canAct}
+          title={canAct ? "Choose a player to Fate (self allowed)" : "Your turn required"}
+        >
+          Fate…
+        </button>
+        {pickOpen && (
+          <div
+            style={{
+              position: "absolute",
+              top: "calc(100% + 6px)",
+              left: 0,
+              zIndex: 20,
+              minWidth: 180,
+              border: "1px solid #334155",
+              borderRadius: 8,
+              background: "#111827",
+              boxShadow: "0 12px 24px rgba(0,0,0,.35)",
+              padding: 6,
+            }}
+          >
+            {players.map(p => (
+              <button
+                key={p.id}
+                onClick={() => { setPickOpen(false); onStartFate(p.id); }}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid transparent",
+                  background: "transparent",
+                  color: "#e5e7eb",
+                  cursor: "pointer",
+                }}
+                title={p.id === myId ? "You can Fate yourself" : "Fate this player"}
+              >
+                {p.name}{p.id === myId ? " (you)" : ""}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* View fate discard (of the focused player) */}
+      <button
+        onClick={() => onOpenFateDiscard(focusPlayer.id)}
+        title="View fate discard"
+      >
+        View Discard
+      </button>
+
+      {/* Reshuffle (for the focused player) */}
+      <button
+        onClick={() => onReshuffleFate(focusPlayer.id)}
+        disabled={!canAct || fateDisc === 0}
+        title={fateDisc === 0 ? "Fate discard is empty" : "Shuffle fate discard into fate deck"}
+      >
+        Shuffle Discard
+      </button>
+
+      <span style={{ marginLeft: "auto", opacity: 0.75 }}>
         {phase === "playing"
           ? (isMyTurn ? "Your turn" : "Waiting…")
           : phase === "lobby"
