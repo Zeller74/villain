@@ -43,6 +43,9 @@ export default function App() {
   const [logItems, setLogItems] = useState<LogItem[]>([]);
   const [moving, setMoving] = useState<{cardId: string; from: number; label: string} | null>(null);
   const [focusPlayerId, setFocusPlayerId] = useState<string | null>(null);
+  const [fateTargetId, setFateTargetId] = useState<string | null>(null);
+  const [fateChoices, setFateChoices] = useState<Card[]>([]);
+  const [fatePlacing, setFatePlacing] = useState<{targetId: string; cardId: string; label: string} | null>(null);  
 
   useEffect(() => {
     const s = makeSocket();
@@ -366,7 +369,16 @@ export default function App() {
   };
 
   const startFateFor = (targetId: string) => {
-    setLastError("Fate start not wired yet — next step"); // TEMP: will replace with socket call
+    const s = sockRef.current!;
+    setLastError(null);
+    // Switch camera to the target (nice UX)
+    setFocusPlayerId(targetId);
+    s.emit("fate:start", { targetId }, (res: { ok: boolean; error?: string; cards?: Card[] }) => {
+      if (!res?.ok) return setLastError(res?.error || "Fate start failed");
+      setFateTargetId(targetId);
+      setFateChoices(res.cards || []);
+      setFatePlacing(null);
+    });
   };
 
   const reshuffleFateDiscardFor = (playerId: string) => {
@@ -378,6 +390,35 @@ export default function App() {
 
   const openFateDiscardFor = (playerId: string) => {
     setLastError("Fate discard viewer not wired yet — next step"); // TEMP
+  };
+
+  const chooseFateCard = (card: Card) => {
+    const s = sockRef.current!;
+    s.emit("fate:choosePlay", { cardId: card.id }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Choose fate card failed");
+      setFatePlacing({ targetId: fateTargetId!, cardId: card.id, label: card.label });
+      // Collapse the panel visually (we’ll hide it when placing is active)
+    });
+  };
+
+  const cancelFate = () => {
+    const s = sockRef.current!;
+    s.emit("fate:cancel", {}, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Cancel fate failed");
+      setFateTargetId(null);
+      setFateChoices([]);
+      setFatePlacing(null);
+    });
+  };
+
+  const placeFateAt = (locIndex: number) => {
+    const s = sockRef.current!;
+    s.emit("fate:placeSelected", { locationIndex: locIndex }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Place fate failed");
+      setFateTargetId(null);
+      setFateChoices([]);
+      setFatePlacing(null);
+    });
   };
 
 
@@ -751,27 +792,134 @@ export default function App() {
                       {/* Top (public) */}
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 12, opacity: 0.7 }}>Top</div>
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+
+                        <div
+                          onClick={() => {
+                            // Click the TOP area to place a fate card (if in placing mode and focused on target)
+                            if (!fatePlacing) return;
+                            if (!focusPlayer || focusPlayer.id !== fatePlacing.targetId) return;
+                            if (loc.locked) { setLastError("Location is locked"); return; }
+                            placeFateAt(i);
+                          }}
+                          title={
+                            fatePlacing
+                              ? (loc.locked ? "Location is locked" : "Click to place fate card here (Top)")
+                              : undefined
+                          }
+                          style={{
+                            display: "flex",
+                            gap: 6,
+                            flexWrap: "wrap",
+                            border: fatePlacing ? "1px dashed #3b82f6" : undefined,
+                            borderRadius: 8,
+                            padding: 6,
+                            cursor: fatePlacing ? "pointer" : "default",
+                            background: "#111827",
+                            minHeight: 88,
+                          }}
+                        >
                           {loc.top.length === 0 ? (
                             <span style={{ opacity: 0.6, fontSize: 12 }}>empty</span>
                           ) : (
-                            loc.top.map(c => (
-                              <div
-                                key={c.id}
-                                title={c.label}
-                                style={{
-                                  minWidth: 54, height: 78,
-                                  border: "1px solid #64748b",
-                                  borderRadius: 6,
-                                  background: "#111827",
-                                  color: "#e5e7eb",
-                                  display: "flex", alignItems: "center", justifyContent: "center",
-                                  fontSize: 11, padding: 4, textAlign: "center",
-                                }}
-                              >
-                                {c.label}
-                              </div>
-                            ))
+                            loc.top.map((c) => {
+                              const canEditTop =
+                                focusPlayerId === myId && room?.game.phase === "playing";
+
+                              return (
+                                <div key={c.id} style={{ position: "relative", display: "inline-block" }}>
+                                  {/* Card face (click doesn't place fate; we stopPropagation) */}
+                                  <div
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      // if you want to start "move from top" later, wire it here
+                                      // if (!canEditTop || c.locked) return;
+                                      // startMoveTop(c.id, i, c.label); // (future)
+                                    }}
+                                    title={c.label}
+                                    style={{
+                                      minWidth: 80, height: 120,
+                                      border: "1px solid #64748b",
+                                      borderRadius: 6,
+                                      background: "#111827",
+                                      color: "#e5e7eb",
+                                      display: "flex", alignItems: "center", justifyContent: "center",
+                                      fontSize: 11, padding: 4, textAlign: "center",
+                                      cursor: canEditTop ? "default" : "default",
+                                      opacity: c.locked ? 0.6 : 1,
+                                    }}
+                                  >
+                                    {/* Lock toggle (owner only) */}
+                                    {canEditTop && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          sockRef.current!.emit(
+                                            "board:toggleCardLock",
+                                            { cardId: c.id, locked: !c.locked },
+                                            (res: { ok: boolean; error?: string }) => {
+                                              if (!res?.ok) setLastError(res?.error || "Toggle card lock failed");
+                                            }
+                                          );
+                                        }}
+                                        title={c.locked ? "Unlock card" : "Lock card"}
+                                        style={{
+                                          position: "absolute", top: 2, left: 2, zIndex: 5,
+                                          fontSize: 10, padding: "1px 4px",
+                                          borderRadius: 6, border: "1px solid #334155",
+                                          background: c.locked ? "#7f1d1d" : "#1e293b",
+                                          color: "#e5e7eb",
+                                          cursor: "pointer",
+                                        }}
+                                      >
+                                        {c.locked ? "🔒" : "🔓"}
+                                      </button>
+                                    )}
+
+                                    {/* Strength badge */}
+                                    {typeof c.strength === "number" && c.strength !== 0 && (
+                                      <div
+                                        style={{
+                                          position: "absolute",
+                                          bottom: 2,
+                                          left: 2,
+                                          zIndex: 4,
+                                          fontSize: 11,
+                                          lineHeight: 1,
+                                          padding: "0 6px",
+                                          borderRadius: 6,
+                                          border: "1px solid #334155",
+                                          background: "#1e293b",
+                                          color: (c.strength ?? 0) < 0 ? "#fca5a5" : "#a7f3d0",
+                                          whiteSpace: "nowrap",
+                                          fontVariantNumeric: "tabular-nums",
+                                        }}
+                                        title={`Strength ${c.strength > 0 ? `+${c.strength}` : `${c.strength}`}`}
+                                      >
+                                        {c.strength > 0 ? `+${c.strength}` : `${c.strength}`}
+                                      </div>
+                                    )}
+
+                                    {/* Strength controls (owner only, and not locked) */}
+                                    {canEditTop && !c.locked && (
+                                      <div style={{ position: "absolute", bottom: 2, right: 2, display: "flex", gap: 4, zIndex: 5 }}>
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); changeCardStrength(c.id, -1); }}
+                                          title="−1 strength"
+                                          style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb" }}
+                                        >−</button>
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); changeCardStrength(c.id, +1); }}
+                                          title="+1 strength"
+                                          style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb" }}
+                                        >+</button>
+                                      </div>
+                                    )}
+
+                                    {c.label}
+                                  </div>
+                                </div>
+                              );
+                            })
                           )}
                         </div>
                       </div>
@@ -915,6 +1063,15 @@ export default function App() {
             onOpenFateDiscard={openFateDiscardFor}
           />
 
+          <FatePanel
+            open={!!fateTargetId && fateChoices.length > 0 && !fatePlacing}
+            cards={fateChoices}
+            onPlay={chooseFateCard}
+            onCancel={cancelFate}
+          />
+
+          <FatePlaceBanner placing={fatePlacing} />
+
           {/* HAND panel (dark) */}
           <div
             style={{
@@ -1051,6 +1208,7 @@ export default function App() {
             />
           </div>
 
+          {/*action log */}
           <div
             style={{
               marginTop: 12,
@@ -1528,6 +1686,84 @@ function FateBar({
           ? "Lobby"
           : "Ended"}
       </span>
+    </div>
+  );
+}
+function FatePanel({
+  open,
+  cards,
+  onPlay,
+  onCancel,
+}: {
+  open: boolean;
+  cards: Card[];
+  onPlay: (card: Card) => void;
+  onCancel: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      style={{
+        border: "1px solid #334155",
+        borderRadius: 12,
+        padding: 10,
+        background: "#111827",
+        color: "#e5e7eb",
+        marginBottom: 12,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <strong>Fate: choose a card to play</strong>
+        <span style={{ marginLeft: "auto" }} />
+        <button onClick={onCancel}>Cancel</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+        {cards.length === 0 ? (
+          <div style={{ opacity: 0.7 }}>No cards available</div>
+        ) : (
+          cards.map((c) => (
+            <div
+              key={c.id}
+              title={c.label}
+              style={{
+                position: "relative",
+                minWidth: 120, height: 160, padding: 8,
+                border: "1px solid #475569", borderRadius: 8,
+                background: "#1f2937", color: "#f1f5f9",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 12, textAlign: "center",
+              }}
+            >
+              {c.label}
+              <div style={{ position: "absolute", bottom: 6, right: 6, display: "flex", gap: 6 }}>
+                <button onClick={() => onPlay(c)} title="Play this fate card">Play</button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+function FatePlaceBanner({
+  placing,
+}: {
+  placing: { targetId: string; cardId: string; label: string } | null;
+}) {
+  if (!placing) return null;
+  return (
+    <div
+      style={{
+        border: "1px dashed #3b82f6",
+        borderRadius: 10,
+        padding: 8,
+        background: "#0b1220",
+        color: "#e5e7eb",
+        marginBottom: 12,
+      }}
+    >
+      Placing <strong>{placing.label}</strong>: click a location <em>Top</em> on the target’s board.
     </div>
   );
 }

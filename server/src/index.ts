@@ -9,15 +9,14 @@ type Zones = {deck: Card[]; hand: Card[]; discard: Card[]; fateDeck: Card[]; fat
 type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
-type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle";
+type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession;};
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play";
 type ActionEntry = {
   id: string;
   ts: number;
   actorId: string;
   type: ActionType;
   data:
-    | { type: "fate_reshuffle"; targetId: string; moved: number}
     | { type: "draw"; cardIds: string[] }
     | { type: "play"; cardId: string; locationIndex: 0|1|2|3 }
     | { type: "discard"; cardIds: string[] }
@@ -30,10 +29,14 @@ type ActionEntry = {
     | { type: "pawn"; prev: 0|1|2|3; next: 0|1|2|3 }
     | { type: "lock"; target: "location"; loc: 0|1|2|3; prev: boolean; next: boolean }
     | { type: "lock"; target: "card"; loc: 0|1|2|3; row: "top"|"bottom"; cardId: string; prev: boolean; next: boolean}
-    | { type: "strength"; cardId: string; loc: 0|1|2|3; row: "top"|"bottom"; prev: number; next: number; delta: number};
+    | { type: "strength"; cardId: string; loc: 0|1|2|3; row: "top"|"bottom"; prev: number; next: number; delta: number}
+    | { type: "fate_reshuffle"; targetId: string; moved: number}
+    | { type: "fate_play"; targetId: string; playedCardId: string; locationIndex: 0|1|2|3; discardedCardId?: string};
+
   undone?: boolean;
 };
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: ActionType | "undo"; text: string}
+type FateSession = {actorId: string; targetId: string; drawn: Card[]; chosenId?: string};
 
 const PORT = Number(process.env.PORT ?? 3001);
 const io = new Server(PORT, {
@@ -214,6 +217,7 @@ function reshuffleFromDiscardIntoDeck(p: Player): boolean {
 function buildLogItem(room: Room, e: ActionEntry): LogItem {
   const actor = room.players.find(p => p.id === e.actorId);
   const name = actor?.name ?? e.actorId.slice(0, 6);
+  const actorName = room.players.find(p => p.id === e.actorId)?.name ?? "Player";
 
   if (e.undone) {
     return {
@@ -322,7 +326,6 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
     const d = e.data as Extract<ActionEntry["data"], { type: "fate_reshuffle" }>;
     const targetId = d.targetId;
 
-    // Old-school loop avoids any union confusion inside a callback
     let targetName = "player";
     for (const p of room.players) {
       if (p.id === targetId) { targetName = p.name; break; }
@@ -334,6 +337,15 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} reshuffled ${n} fate card${n === 1 ? "" : "s"} for ${targetName}`,
     };
   }
+  if (e.data.type === "fate_play") {
+    const d = e.data as Extract<ActionEntry["data"], { type: "fate_play" }>;
+    const targetName = room.players.find(pp => pp.id === d.targetId)?.name ?? "player";
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName, type: "fate_play",
+      text: `${actorName} fated ${targetName}: played a fate card to L${d.locationIndex + 1}${d.discardedCardId ? " (discarded another)" : ""}`,
+    };
+  }
+
   //fallback
   return {
     id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: e.type,
@@ -375,6 +387,21 @@ function shuffleFateDiscardIntoDeck(p: Player): number {
   shuffle(p.zones.fateDeck);
   return moved;
 }
+
+function drawFromFate(p: Player, n: number): Card[] {
+  while (p.zones.fateDeck.length < n && p.zones.fateDiscard.length > 0) {
+    shuffleFateDiscardIntoDeck(p);
+  }
+  const out: Card[] = [];
+  for (let i = 0; i < n && p.zones.fateDeck.length > 0; i++) {
+    const c = p.zones.fateDeck.pop()!;
+    // Fate cards are revealed on draw; keep faceUp true.
+    c.faceUp = true;
+    out.push(c);
+  }
+  return out;
+}
+
 
 
 io.on("connection", (socket) => {
@@ -1224,6 +1251,114 @@ io.on("connection", (socket) => {
 
       ack?.({ ok: true });
     });
+    socket.on("fate:start", (payload: { targetId: string } | undefined, ack?: (res: { ok: boolean; error?: string; cards?: Card[] }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok: false, error: "not your turn" });
+      if (room.fate) return ack?.({ ok: false, error: "fate already in progress" });
+
+      const tid = (payload?.targetId || "").trim();
+      const target = room.players.find(p => p.id === tid);
+      if (!target) return ack?.({ ok: false, error: "target not found" });
+
+      // allow fating yourself:
+      const drawn = drawFromFate(target, 2); // may be 0, 1 or 2 depending on piles
+      if (drawn.length === 0) return ack?.({ ok: false, error: "no fate cards available" });
+
+      room.fate = { actorId: socket.id, targetId: target.id, drawn };
+
+      // Broadcast counts changed (deck reduced), but not the cards
+      emitRoomState(io, roomId);
+
+      // Only the actor sees the actual drawn cards
+      ack?.({ ok: true, cards: drawn });
+    });
+    socket.on("fate:cancel", (_: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (!room.fate || room.fate.actorId !== socket.id) return ack?.({ ok: false, error: "no active fate" });
+
+      const sess = room.fate;
+      const target = room.players.find(p => p.id === sess.targetId);
+      if (!target) { delete room.fate; return ack?.({ ok: true }); }
+
+      // Put drawn cards back on top (reverse to keep original top order)
+      for (let i = sess.drawn.length - 1; i >= 0; i--) {
+        const c = sess.drawn[i];
+        if (c) target.zones.fateDeck.push(c);
+      }
+      delete room.fate;
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
+    socket.on("fate:choosePlay", (payload: { cardId: string } | undefined, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (!room.fate || room.fate.actorId !== socket.id) return ack?.({ ok: false, error: "no active fate" });
+
+      const sess = room.fate;
+      const id = (payload?.cardId || "").trim();
+      if (!id) return ack?.({ ok: false, error: "missing cardId" });
+      if (!sess.drawn.some(c => c.id === id)) return ack?.({ ok: false, error: "card not in fate choices" });
+
+      sess.chosenId = id;
+      ack?.({ ok: true });
+    });
+    socket.on("fate:placeSelected", (payload: { locationIndex: number } | undefined, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+
+      const sess = room.fate;
+      if (!sess || sess.actorId !== socket.id) return ack?.({ ok: false, error: "no active fate" });
+
+      const target = room.players.find(p => p.id === sess.targetId);
+      if (!target) { delete room.fate; return ack?.({ ok: false, error: "target missing" }); }
+
+      const raw = Number(payload?.locationIndex);
+      if (!Number.isInteger(raw) || raw < 0 || raw > 3) return ack?.({ ok: false, error: "bad location index" });
+      const i = raw as 0|1|2|3;
+
+      const loc = target.board.locations[i];
+      if (!loc) return ack?.({ ok: false, error: "bad location" });
+      if (loc.locked) return ack?.({ ok: false, error: "location is locked" });
+
+      const chosen = room.fate!.chosenId
+        ? room.fate!.drawn.find(c => c && c.id === room.fate!.chosenId)
+        : room.fate!.drawn[0];
+
+      if (!chosen) return ack?.({ ok: false, error: "no chosen card" });
+      const other = room.fate!.drawn.find(c => c && c.id !== chosen.id) || null;
+
+      loc.top.push(chosen);
+      if (other) target.zones.fateDiscard.push(other);
+
+      delete room.fate;
+      emitRoomState(io, roomId);
+
+      const data = other
+        ? { type: "fate_play" as const, targetId: target.id, playedCardId: chosen.id, locationIndex: i, discardedCardId: other.id }
+        : { type: "fate_play" as const, targetId: target.id, playedCardId: chosen.id, locationIndex: i };
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "fate_play",
+        data,
+      });
+      ack?.({ ok: true });
+    });
+
+
 
 });
 
