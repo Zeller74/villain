@@ -1,6 +1,5 @@
 import {Server} from "socket.io";
 import {nanoid} from "nanoid";
-import { measureMemory } from "vm";
 
 type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?: boolean};
 type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, Location]}
@@ -361,7 +360,6 @@ function emitRoomLog(io: Server, roomId: string) {
   io.to(roomId).emit("room:log", { items });
 }
 
-// append and broadcast (cap length to keep memory bounded)
 function pushLog(io: Server, roomId: string, entry: ActionEntry) {
   const room = rooms.get(roomId);
   if (!room) return;
@@ -736,7 +734,6 @@ io.on("connection", (socket) => {
       const target = room.players.find(p => p.id === pid);
       if (!target) return ack?.({ ok: false, error: "player not found" });
 
-      // Discard is public. Return top-first ordering.
       const cards = target.zones.discard.slice().reverse();
       ack?.({ ok: true, cards });
     });
@@ -1356,6 +1353,56 @@ io.on("connection", (socket) => {
         data,
       });
       ack?.({ ok: true });
+    });
+    socket.on("fate:getDiscard", (payload: { playerId: string } | undefined, ack?: (res: { ok: boolean; error?: string; cards?: Card[] }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+
+      const pid = (payload?.playerId || "").trim();
+      const target = room.players.find(p => p.id === pid);
+      if (!target) return ack?.({ ok: false, error: "player not found" });
+
+      // top-first view
+      const cards = target.zones.fateDiscard.slice().reverse();
+      return ack?.({ ok: true, cards });
+    });
+    socket.on("fate:startFromDiscard", (payload: { targetId: string; cardId: string } | undefined, ack?: (res: { ok: boolean; error?: string; card?: Card }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok: false, error: "not your turn" });
+      if (room.fate) return ack?.({ ok: false, error: "fate already in progress" });
+
+      const tid = (payload?.targetId || "").trim();
+      const cid = (payload?.cardId || "").trim();
+      if (!tid || !cid) return ack?.({ ok: false, error: "bad input" });
+
+      const target = room.players.find(p => p.id === tid);
+      if (!target) return ack?.({ ok: false, error: "target not found" });
+
+      const idx = target.zones.fateDiscard.findIndex(c => c.id === cid);
+      if (idx === -1) return ack?.({ ok: false, error: "card not in fate discard" });
+
+      const [card] = target.zones.fateDiscard.splice(idx, 1);
+      if (!card) return ack?.({ ok: false, error: "card missing" });
+
+      // Create a single-card fate session, pre-chosen
+      room.fate = {
+        actorId: socket.id,
+        targetId: target.id,
+        drawn: [card],
+        chosenId: card.id,
+      };
+
+      // Everyone sees counts change immediately
+      emitRoomState(io, roomId);
+
+      // Only the actor needs the actual card back (UI convenience)
+      return ack?.({ ok: true, card });
     });
 
 

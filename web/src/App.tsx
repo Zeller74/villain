@@ -45,7 +45,11 @@ export default function App() {
   const [focusPlayerId, setFocusPlayerId] = useState<string | null>(null);
   const [fateTargetId, setFateTargetId] = useState<string | null>(null);
   const [fateChoices, setFateChoices] = useState<Card[]>([]);
-  const [fatePlacing, setFatePlacing] = useState<{targetId: string; cardId: string; label: string} | null>(null);  
+  const [fatePlacing, setFatePlacing] = useState<{targetId: string; cardId: string; label: string} | null>(null); 
+  const [showFateDiscard, setShowFateDiscard] = useState(false);
+  const [fateDiscardCards, setFateDiscardCards] = useState<Card[]>([]);
+  const [fateDiscardTarget, setFateDiscardTarget] = useState<string | null>(null);
+
 
   useEffect(() => {
     const s = makeSocket();
@@ -389,7 +393,14 @@ export default function App() {
   };
 
   const openFateDiscardFor = (playerId: string) => {
-    setLastError("Fate discard viewer not wired yet — next step"); // TEMP
+    const s = sockRef.current!;
+    setLastError(null);
+    s.emit("fate:getDiscard", { playerId }, (res: { ok: boolean; error?: string; cards?: Card[] }) => {
+      if (!res?.ok) return setLastError(res?.error || "Failed to fetch fate discard");
+      setFateDiscardTarget(playerId);
+      setFateDiscardCards(res.cards || []);
+      setShowFateDiscard(true);
+    });
   };
 
   const chooseFateCard = (card: Card) => {
@@ -420,6 +431,22 @@ export default function App() {
       setFatePlacing(null);
     });
   };
+
+  const startFateFromDiscard = (targetId: string, cardId: string) => {
+    const s = sockRef.current!;
+    setLastError(null);
+    // Switch camera to the target (nice UX)
+    setFocusPlayerId(targetId);
+    s.emit("fate:startFromDiscard", { targetId, cardId }, (res: { ok: boolean; error?: string; card?: Card }) => {
+      if (!res?.ok) return setLastError(res?.error || "Start fate from discard failed");
+      setShowFateDiscard(false);
+      setFateTargetId(targetId);
+      const card = res.card!;
+      setFateChoices([card]); // for consistency, though we go straight to placing
+      setFatePlacing({ targetId, cardId: card.id, label: card.label });
+    });
+  };
+
 
 
 
@@ -1193,6 +1220,17 @@ export default function App() {
             onTakeCard={(card) => takeFromDiscard(card.id)}
             onClose={() => setShowDiscard(false)}
           />
+          <FateDiscardModal
+            open={showFateDiscard}
+            cards={fateDiscardCards}
+            onClose={() => setShowFateDiscard(false)}
+            onTake={(card) => {
+              if (!fateDiscardTarget) return;
+              startFateFromDiscard(fateDiscardTarget, card.id);
+            }}
+            targetName={room?.players.find(p => p.id === fateDiscardTarget)?.name ?? "player"}
+          />
+
 
 
 
@@ -1764,6 +1802,110 @@ function FatePlaceBanner({
       }}
     >
       Placing <strong>{placing.label}</strong>: click a location <em>Top</em> on the target’s board.
+    </div>
+  );
+}
+function FateDiscardModal({
+  open,
+  cards,
+  onClose,
+  onTake,
+  targetName,
+}: {
+  open: boolean;
+  cards: Card[];
+  onClose: () => void;
+  onTake: (card: Card) => void;
+  targetName: string;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.55)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(720px, 90vw)",
+          maxHeight: "75vh",
+          overflowY: "auto",
+          background: "#111827",
+          color: "#e5e7eb",
+          border: "1px solid #334155",
+          borderRadius: 12,
+          padding: 12,
+          boxShadow: "0 12px 30px rgba(0,0,0,.45)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <strong>Fate discard — {targetName} ({cards.length})</strong>
+          <span style={{ marginLeft: "auto" }} />
+          <button onClick={onClose}>Close</button>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
+            gap: 10,
+            marginTop: 12,
+          }}
+        >
+          {cards.length === 0 ? (
+            <div style={{ opacity: 0.7 }}>Empty</div>
+          ) : (
+            cards.map((c, idx) => (
+              <div
+                key={c.id}
+                title={c.label}
+                style={{
+                  position: "relative",
+                  minWidth: 100,
+                  height: 140,
+                  padding: 8,
+                  border: "1px solid #475569",
+                  borderRadius: 8,
+                  background: "#1f2937",
+                  color: "#f1f5f9",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  textAlign: "center",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 6,
+                    left: 8,
+                    fontSize: 11,
+                    opacity: 0.6,
+                  }}
+                >
+                  #{cards.length - idx}
+                </div>
+                {c.label}
+                <div style={{ position: "absolute", bottom: 6, right: 6, display: "flex", gap: 6 }}>
+                  <button onClick={() => onTake(c)} title="Take this card to start fate">
+                    Take
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }
