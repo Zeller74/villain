@@ -18,6 +18,39 @@ type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; stren
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "pawn" | "strength" | "fate_reshuffle"; text: string;}
+type ActionKind =
+  | "gain1" | "gain2" | "gain3"
+  | "play1" | "play2"
+  | "draw2"
+  | "fate"
+  | "discard"
+  | "moveItemAlly"
+  | "moveHero"
+  | "vanquish"
+  | "activate";
+
+const ACTION_LABELS: Record<ActionKind, string> = {
+  gain1: "Gain 1",
+  gain2: "Gain 2",
+  gain3: "Gain 3",
+  play1: "Play 1",
+  play2: "Play 2",
+  draw2: "Draw 2",
+  fate: "Fate",
+  discard: "Discard",
+  moveItemAlly: "Move Item/Ally",
+  moveHero: "Move Hero",
+  vanquish: "Vanquish",
+  activate: "Activate",
+};
+
+// For now, a simple default layout for the 4 locations (tweak anytime)
+const DEFAULT_LOC_ACTIONS: ActionKind[][] = [
+  ["gain3", "play1", "fate", "discard"],
+  ["gain2", "play2", "moveItemAlly", "vanquish"],
+  ["draw2", "play1", "moveHero", "activate"],
+  ["gain1", "discard", "play1", "fate"],
+];
 
 
 export default function App() {
@@ -41,7 +74,7 @@ export default function App() {
   const [showDiscard, setShowDiscard] = useState(false);
   const [discardCards, setDiscardCards] = useState<Card[]>([]);
   const [logItems, setLogItems] = useState<LogItem[]>([]);
-  const [moving, setMoving] = useState<{cardId: string; from: number; label: string} | null>(null);
+  const [moving, setMoving] = useState<{ cardId: string; from: number; label: string; row: "bottom" | "top" } | null>(null);
   const [focusPlayerId, setFocusPlayerId] = useState<string | null>(null);
   const [fateTargetId, setFateTargetId] = useState<string | null>(null);
   const [fateChoices, setFateChoices] = useState<Card[]>([]);
@@ -319,13 +352,13 @@ export default function App() {
 
   const startMove = (cardId: string, from: number, label: string) => {
     if (!isMyTurn) { setLastError("Not your turn"); return; }
-    setMoving({ cardId, from, label });
+    setMoving({ cardId, from, label, row: "bottom"});
   };
 
   const cancelMove = () => setMoving(null);
 
   const dropMoveTo = (to: number) => {
-    if (!moving) return;
+    if (!moving || moving.row !== "bottom") return;
     const s = sockRef.current!;
     s.emit("game:moveCard", { cardId: moving.cardId, from: moving.from, to }, (res: { ok: boolean; error?: string }) => {
       if (!res?.ok) return setLastError(res?.error || "Move failed");
@@ -447,7 +480,42 @@ export default function App() {
     });
   };
 
+  const startMoveTop = (cardId: string, from: number, label: string) => {
+    if (!isMyTurn || focusPlayerId !== myId) { setLastError("Not your turn"); return; }
+    setMoving({ cardId, from, label, row: "top" });
+  };
 
+  const dropMoveTop = (toLoc: number) => {
+    if (!moving || moving.row !== "top") return;
+    console.log("dropMoveTop →", { from: moving.from, to: toLoc, cardId: moving.cardId });
+    const s = sockRef.current!;
+    s.emit("board:moveTop", { cardId: moving.cardId, from: moving.from, to: toLoc },
+      (res: { ok: boolean; error?: string }) => {
+        if (!res?.ok) return setLastError(res?.error || "Move top failed");
+        setMoving(null);
+      });
+  };
+
+  const discardTopFromMoving = () => {
+    if (!moving || moving.row !== "top") return;
+    const s = sockRef.current!;
+    s.emit(
+      "board:discardTop",
+      { locationIndex: moving.from, cardId: moving.cardId },
+      (res: { ok: boolean; error?: string } | undefined) => {
+        if (!res?.ok) return setLastError(res?.error || "Discard top failed");
+        setMoving(null);
+      }
+    );
+  };
+
+  const claimWin = () => {
+    const s = sockRef.current!;
+    setLastError(null);
+    s.emit("game:claimWin", {}, (res: { ok: boolean; error?: string } | undefined) => {
+      if (!res?.ok) setLastError(res?.error || "Win failed");
+    });
+  };
 
 
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
@@ -460,6 +528,8 @@ export default function App() {
   const lastLog = logItems[0] ?? null;
   const canUndo = !!(lastLog && myId && lastLog.actorId === myId && lastLog.type !== "undo" && room?.game.phase === "playing");
   const canTakeFromThisDiscard = !!(focusPlayer && myId && focusPlayer.id === myId && isMyTurn);
+  const viewingSelf = !!(myId && focusPlayerId === myId);
+  
 
 
  
@@ -661,6 +731,15 @@ export default function App() {
               </span>
             </div>
             <div style={{ marginLeft: "auto" }}>
+              {viewingSelf && (
+                <button
+                  onClick={claimWin}
+                  title="Announce that you've achieved your objective"
+                  style={{ marginLeft: 6 }}
+                >
+                  I Win
+                </button>
+              )}
               <button onClick={endTurn} disabled={!inRoom || !isMyTurn}>
                 End Turn
               </button>
@@ -715,7 +794,14 @@ export default function App() {
             }}>
               Moving <strong>{moving.label}</strong>
               <span style={{ opacity: 0.7 }}>&middot; click a location to drop</span>
-              <button onClick={removeFromBoard} style={{ marginLeft: "auto" }}>Discard card</button>
+              {moving.row === "bottom" && (
+                <button onClick={removeFromBoard} style={{ marginLeft: "auto" }}>Discard card</button>
+              )}
+              {moving.row === "top" && (
+                <button onClick={discardTopFromMoving} title="Send this Top card to Fate discard">
+                  Discard card
+                </button>
+              )}
               <button onClick={cancelMove} style={{ marginLeft: "auto" }}>Cancel</button>
             </div>
           )}
@@ -757,6 +843,7 @@ export default function App() {
                   const isPawnHere = focusPlayer.board.moverAt === i;
                   const canSetPawn = viewingSelf && isMyTurn;
                   const canToggleLocLock = viewingSelf && isMyTurn;
+                  const canBottomAct = (moving?.row === "bottom") || (canDropHere && selectedIds.size === 1);
 
                   return (
                     <div
@@ -822,11 +909,18 @@ export default function App() {
 
                         <div
                           onClick={() => {
-                            // Click the TOP area to place a fate card (if in placing mode and focused on target)
-                            if (!fatePlacing) return;
-                            if (!focusPlayer || focusPlayer.id !== fatePlacing.targetId) return;
-                            if (loc.locked) { setLastError("Location is locked"); return; }
-                            placeFateAt(i);
+                            if (fatePlacing) {
+                              if (!focusPlayer || focusPlayer.id !== fatePlacing.targetId) return;
+                              if (loc.locked) { setLastError("Location is locked"); return; }
+                              placeFateAt(i);
+                              return;
+                            }
+                            if (moving?.row === "top") {
+                              if (!isMyTurn || focusPlayerId !== myId) return;
+                              if (loc.locked) { setLastError("Location is locked"); return; }
+                              dropMoveTop(i);
+                              return;
+                            }
                           }}
                           title={
                             fatePlacing
@@ -837,12 +931,12 @@ export default function App() {
                             display: "flex",
                             gap: 6,
                             flexWrap: "wrap",
-                            border: fatePlacing ? "1px dashed #3b82f6" : undefined,
+                            border: (fatePlacing || moving?.row === "top") ? "1px dashed #3b82f6" : "1px solid #475569",
                             borderRadius: 8,
                             padding: 6,
-                            cursor: fatePlacing ? "pointer" : "default",
+                            cursor: (fatePlacing || moving?.row === "top") ? "pointer" : "default",
                             background: "#111827",
-                            minHeight: 88,
+                            minHeight: 130,
                           }}
                         >
                           {loc.top.length === 0 ? (
@@ -854,13 +948,17 @@ export default function App() {
 
                               return (
                                 <div key={c.id} style={{ position: "relative", display: "inline-block" }}>
-                                  {/* Card face (click doesn't place fate; we stopPropagation) */}
                                   <div
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      // if you want to start "move from top" later, wire it here
-                                      // if (!canEditTop || c.locked) return;
-                                      // startMoveTop(c.id, i, c.label); // (future)
+                                      if (!isMyTurn || focusPlayerId !== myId) return;
+                                      if (moving?.row === "top") {
+                                        if (loc.locked) { setLastError("Location is locked"); return; }
+                                        dropMoveTop(i);
+                                        return;
+                                      }
+                                      if (c.locked) { setLastError("Card is locked"); return; }
+                                      startMoveTop(c.id, i, c.label);
                                     }}
                                     title={c.label}
                                     style={{
@@ -871,7 +969,9 @@ export default function App() {
                                       color: "#e5e7eb",
                                       display: "flex", alignItems: "center", justifyContent: "center",
                                       fontSize: 11, padding: 4, textAlign: "center",
-                                      cursor: canEditTop ? "default" : "default",
+                                      cursor: (isMyTurn && focusPlayerId === myId) || (moving?.row === "top")
+                                        ? "pointer"
+                                        : "default",
                                       opacity: c.locked ? 0.6 : 1,
                                     }}
                                   >
@@ -951,10 +1051,19 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/*Location actions */}
+                      <LocationActions
+                        locIndex={i}
+                        locked={!!loc.locked}
+                        isActive={viewingSelf && isMyTurn && !loc.locked}
+                      />
+
+          
                       {/* Bottom (your plays) */}
+                      <div style={{ fontSize: 12, opacity: 0.7 }}>Bottom</div>
                       <div
                         onClick={() => {
-                          if(moving){
+                          if(moving?.row === "bottom"){
                             dropMoveTo(i);
                             return;
                           }
@@ -963,12 +1072,12 @@ export default function App() {
                           playTo(i);
                         }}
                         style={{
-                          border: "1px dashed " + (canDropHere ? "#3b82f6" : "#475569"),
+                          border: canBottomAct ? "1px dashed #3b82f6" : "1px solid #475569",
                           borderRadius: 8,
                           padding: 6,
                           background: "#111827",
                           cursor: canDropHere && (moving || selectedIds.size > 0) ? "pointer" : "default",
-                          minHeight: 88,
+                          minHeight: 130,
                         }}
                         title={
                           !viewingSelf ? "You can only play on your own board"
@@ -978,7 +1087,6 @@ export default function App() {
                             selectedIds.size === 1 ? "Click to play the selected card here" : "Select exactly one card")
                         }
                       >
-                        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>Bottom</div>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {loc.bottom.length === 0 ? (
                             <span style={{ opacity: 0.6, fontSize: 12 }}>empty</span>
@@ -1906,6 +2014,66 @@ function FateDiscardModal({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+function LocationActions({
+  locIndex,
+  locked,
+  isActive, // your turn + viewing self + not locked
+}: {
+  locIndex: number;
+  locked?: boolean;
+  isActive: boolean;
+}) {
+  const actions = DEFAULT_LOC_ACTIONS[locIndex] ?? [];
+  const baseOpacity = locked ? 0.45 : isActive ? 1 : 0.75;
+
+  return (
+    <div
+      style={{
+        margin: "6px 0",
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 6,
+        padding: "6px 8px",
+        borderRadius: 8,
+        background: "#0b1220",
+        border: "1px solid #334155",
+        opacity: baseOpacity,
+      }}
+      title={
+        locked
+          ? "Location locked"
+          : isActive
+          ? "Available actions on this space"
+          : "Actions on this space (view-only)"
+      }
+    >
+      {actions.length === 0 ? (
+        <span style={{ fontSize: 12, color: "#94a3b8" }}>No actions</span>
+      ) : (
+        actions.map((a) => (
+          <span
+            key={a}
+            style={{
+              fontSize: 12,
+              lineHeight: 1,
+              padding: "4px 8px",
+              borderRadius: 999,
+              border: "1px solid #475569",
+              background: "#111827",
+              color: "#e5e7eb",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {ACTION_LABELS[a]}
+          </span>
+        ))
+      )}
+      {locked && (
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#fca5a5" }}>🔒 Locked</span>
+      )}
     </div>
   );
 }

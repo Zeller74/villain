@@ -5,11 +5,11 @@ type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?:
 type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, Location]}
 type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; strength?: number;};
 type Zones = {deck: Card[]; hand: Card[]; discard: Card[]; fateDeck: Card[]; fateDiscard: Card[]};
-type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number;};
+type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number; won?: boolean;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession;};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -30,7 +30,9 @@ type ActionEntry = {
     | { type: "lock"; target: "card"; loc: 0|1|2|3; row: "top"|"bottom"; cardId: string; prev: boolean; next: boolean}
     | { type: "strength"; cardId: string; loc: 0|1|2|3; row: "top"|"bottom"; prev: number; next: number; delta: number}
     | { type: "fate_reshuffle"; targetId: string; moved: number}
-    | { type: "fate_play"; targetId: string; playedCardId: string; locationIndex: 0|1|2|3; discardedCardId?: string};
+    | { type: "fate_play"; targetId: string; playedCardId: string; locationIndex: 0|1|2|3; discardedCardId?: string}
+    | { type: "move_top"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number }
+    | { type: "fate_discard_top"; cardId: string; locationIndex: 0|1|2|3 };
 
   undone?: boolean;
 };
@@ -344,6 +346,24 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${actorName} fated ${targetName}: played a fate card to L${d.locationIndex + 1}${d.discardedCardId ? " (discarded another)" : ""}`,
     };
   }
+  if (e.data.type === "move_top") {
+    const d = e.data;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName,
+      type: "move_top",
+      text: `${actorName} moved a top card from L${d.from + 1} to L${d.to + 1}`,
+    };
+  }
+  if (e.data.type === "fate_discard_top") {
+    const d = e.data;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName,
+      type: "fate_discard_top",
+      text: `${actorName} discarded a top card from L${d.locationIndex + 1}`,
+    };
+  }
+
+
 
   //fallback
   return {
@@ -399,6 +419,35 @@ function drawFromFate(p: Player, n: number): Card[] {
   }
   return out;
 }
+
+function advanceToNextActive(room: Room): void {
+  const players = room.players;
+  if (players.length === 0) {
+    room.game.activePlayerId = null;
+    return;
+  }
+
+  const curId = room.game.activePlayerId ?? null;
+  const startIdx = curId ? players.findIndex(p => p.id === curId) : -1;
+
+  // Try at most N candidates in seating order
+  for (let step = 1; step <= players.length; step++) {
+    // wrap around; when startIdx === -1, first candidate is index 0
+    const idx = (startIdx + step) % players.length;
+    const candidate = players[idx]; // Player | undefined
+
+    // extra guard for TS + explicit winner check
+    if (candidate && candidate.won !== true) {
+      room.game.activePlayerId = candidate.id;
+      room.game.turn += 1;
+      return;
+    }
+  }
+
+  // No eligible players (everyone has won)
+  room.game.activePlayerId = null;
+}
+
 
 
 
@@ -606,6 +655,7 @@ io.on("connection", (socket) => {
         room.game.activePlayerId = nextPlayer.id;
         if (wrapped) room.game.turn += 1;
 
+        advanceToNextActive(room);
         ack?.({ ok: true });
         emitRoomState(io, roomId);
     });
@@ -873,9 +923,7 @@ io.on("connection", (socket) => {
       } else if (last.type === "lock" && last.data.type === "lock") {
         const me = room.players.find(p => p.id === socket.id);
         if (!me) return ack?.({ ok: false, error: "player not found" });
-
         const d = last.data; // narrow once
-
         if (d.target === "location") {
           const i = d.loc as 0 | 1 | 2 | 3;
           const loc = me.board.locations[i];
@@ -1404,8 +1452,120 @@ io.on("connection", (socket) => {
       // Only the actor needs the actual card back (UI convenience)
       return ack?.({ ok: true, card });
     });
+    socket.on("board:moveTop", (payload: {cardId?: string; from?: number; to?: number} | undefined, ack?: (res: {ok: boolean; error?: string}) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok: false, error: "not your turn" });
 
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
 
+      const cardId = (payload?.cardId || "").trim();
+      const from = Number(payload?.from);
+      const to   = Number(payload?.to);
+      if (!cardId || !Number.isInteger(from) || !Number.isInteger(to) || from < 0 || from > 3 || to < 0 || to > 3) {
+        return ack?.({ ok: false, error: "bad input" });
+      }
+
+      const fromLoc = me.board.locations[from];
+      const toLoc   = me.board.locations[to];
+      if (!fromLoc || !toLoc) return ack?.({ ok: false, error: "bad location" });
+      if (toLoc.locked) return ack?.({ ok: false, error: "destination locked" });
+
+      const j = fromLoc.top.findIndex(c => c.id === cardId);
+      if (j === -1) return ack?.({ ok: false, error: "card not in top at source" });
+      const [card] = fromLoc.top.splice(j, 1);
+      if (!card) return ack?.({ ok: false, error: "card missing" });
+
+      const destIndex = toLoc.top.length;
+      toLoc.top.push(card);
+
+      emitRoomState(io, roomId);
+
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "move_top",
+        data: { type: "move_top", cardId, from: from as 0|1|2|3, to: to as 0|1|2|3, fromIndex: j, toIndex: toLoc.top.length - 1 },
+      });
+
+      ack?.({ ok: true });
+    })
+    socket.on("board:discardTop", (payload: {locationIndex?: number; cardId?: string} | undefined, ack?: (res: {ok: boolean; error?: string}) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok: false, error: "not your turn" });
+
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const iRaw = Number(payload?.locationIndex);
+      const cardId = (payload?.cardId || "").trim();
+      if (!Number.isInteger(iRaw) || iRaw < 0 || iRaw > 3) return ack?.({ ok: false, error: "bad location index" });
+      if (!cardId) return ack?.({ ok: false, error: "missing cardId" });
+
+      const i = iRaw as 0|1|2|3;
+      const loc = me.board.locations[i];
+      if (!loc) return ack?.({ ok: false, error: "bad location" });
+      if (loc.locked) return ack?.({ ok: false, error: "location is locked" });
+
+      const j = loc.top.findIndex(c => c.id === cardId);
+      if (j === -1) return ack?.({ ok: false, error: "card not in top at that location" });
+
+      const [card] = loc.top.splice(j, 1);
+      if (!card) return ack?.({ ok: false, error: "card missing" });
+
+      // Top → fateDiscard
+      me.zones.fateDiscard.push(card);
+
+      emitRoomState(io, roomId);
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "fate_discard_top",
+        data: { type: "fate_discard_top", cardId, locationIndex: i },
+      });
+
+      ack?.({ ok: true });
+    })
+    socket.on("game:claimWin", (_: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      me.won = true;
+
+      const msg: ChatMsg = {
+        id: nanoid(8),
+        ts: Date.now(),
+        playerId: me.id,
+        name: me.name,
+        text: `${me.name} has claimed victory! 🏆`,
+      };
+      room.messages.push(msg);
+      
+      if (room.messages.length > 100) room.messages = room.messages.slice(-100);
+      io.to(roomId).emit("chat:msg", { roomId, msg });
+
+      if (room.game.activePlayerId === me.id) {
+        advanceToNextActive(room);
+      }
+
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
 
 });
 
