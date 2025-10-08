@@ -1,12 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import {makeSocket} from "./socket";
-
-const CHARACTERS = [
-  { id: "bandit",   name: "Bandit" },
-  { id: "sorcerer", name: "Sorcerer" },
-  { id: "warlord",  name: "Warlord" },
-  { id: "inventor", name: "Inventor" },
-];
 
 
 type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number; fateDeck?: number; fateDiscard?: number}; discardTop: Card | null; board: Board; power?: number;};
@@ -14,13 +7,13 @@ type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlaye
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string};
-type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; strength?: number};
-type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]};
+type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; desc?: string; cost: number; baseStrength?: number | null; strength?: number};
+type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]; actions?: ActionKind[]; topSlots?: number;};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "pawn" | "strength" | "fate_reshuffle"; text: string;}
 type ActionKind =
   | "gain1" | "gain2" | "gain3"
-  | "play1" | "play2"
+  | "play"
   | "draw2"
   | "fate"
   | "discard"
@@ -28,13 +21,17 @@ type ActionKind =
   | "moveHero"
   | "vanquish"
   | "activate";
+type CharacterPreview = {
+  id: string;
+  name: string;
+  locations: { name: string; actions: ActionKind[]; topSlots?: number }[];
+};
 
 const ACTION_LABELS: Record<ActionKind, string> = {
   gain1: "Gain 1",
   gain2: "Gain 2",
   gain3: "Gain 3",
-  play1: "Play 1",
-  play2: "Play 2",
+  play: "Play 1",
   draw2: "Draw 2",
   fate: "Fate",
   discard: "Discard",
@@ -44,13 +41,8 @@ const ACTION_LABELS: Record<ActionKind, string> = {
   activate: "Activate",
 };
 
-// For now, a simple default layout for the 4 locations (tweak anytime)
-const DEFAULT_LOC_ACTIONS: ActionKind[][] = [
-  ["gain3", "play1", "fate", "discard"],
-  ["gain2", "play2", "moveItemAlly", "vanquish"],
-  ["draw2", "play1", "moveHero", "activate"],
-  ["gain1", "discard", "play1", "fate"],
-];
+
+
 
 
 export default function App() {
@@ -82,6 +74,8 @@ export default function App() {
   const [showFateDiscard, setShowFateDiscard] = useState(false);
   const [fateDiscardCards, setFateDiscardCards] = useState<Card[]>([]);
   const [fateDiscardTarget, setFateDiscardTarget] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<CharacterPreview[]>([]);
+  const [pendingCharId, setPendingCharId] = useState<string>("");
 
 
   useEffect(() => {
@@ -91,6 +85,18 @@ export default function App() {
     s.on("connect", () => {
       setStatus("connected");
       setMyId(s.id ?? null);
+          // ask server for available characters
+      s.emit("meta:getCharacters", {}, (res: { ok: boolean; characters?: CharacterPreview[]; error?: string } | undefined) => {
+        if (res?.ok && res.characters) {
+          setCatalog(res.characters);
+          // default select first if nothing chosen
+          if (!pendingCharId && res.characters.length > 0) {
+            setPendingCharId(res.characters[0].id);
+          }
+        } else {
+          setLastError(res?.error || "Failed to load character list");
+        }
+      });
     });
     s.on("disconnect", () =>{
        setStatus("disconnected");
@@ -517,6 +523,11 @@ export default function App() {
     });
   };
 
+  const catById = useMemo(
+    () => Object.fromEntries(catalog.map(c => [c.id, c] as const)),
+    [catalog]
+  );
+
 
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
   const inRoom = !!room;
@@ -649,7 +660,9 @@ export default function App() {
                     {p.name} {p.id === room.ownerId ? "(owner)" : ""} —{" "}
                     <span>{p.ready ? "✅ ready" : "⌛ not ready"}</span>{" "}
                     <span style={{ opacity: 0.7, marginLeft: 8 }}>
-                      {p.characterId ? `as ${p.characterId}` : "(no character)"}
+                      {p.characterId
+                        ? `as ${catById[p.characterId]?.name ?? p.characterId}`
+                        : "(no character)"}
                     </span>
                     {myId === p.id ? " — you" : ""}
                   </li>
@@ -667,7 +680,7 @@ export default function App() {
                       style={{ padding: 6 }}
                     >
                       <option value="" disabled>Choose…</option>
-                      {CHARACTERS.map(c => (
+                      {catalog.map(c => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
@@ -1053,7 +1066,9 @@ export default function App() {
 
                       {/*Location actions */}
                       <LocationActions
-                        locIndex={i}
+                        actions={loc.actions ?? []}
+                        topSlots={loc.topSlots ?? 0}
+                        hasTopCover={(loc.top?.length ?? 0) > 0}
                         locked={!!loc.locked}
                         isActive={viewingSelf && isMyTurn && !loc.locked}
                       />
@@ -1136,6 +1151,30 @@ export default function App() {
                                       {c.locked ? "🔒" : "🔓"}
                                     </button>
                                   )}
+                                  {typeof c.baseStrength === "number" && (
+                                    <div
+                                      style={{
+                                        position: "absolute", top: 2, left: 2, zIndex: 5,
+                                        fontSize: 11, padding: "0 6px", borderRadius: 6,
+                                        border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb",
+                                      }}
+                                      title="Printed strength"
+                                    >
+                                      {c.baseStrength}
+                                    </div>
+                                  )}
+
+                                  {/* cost — top-right (cost can be 0; still display) */}
+                                  <div
+                                    style={{
+                                      position: "absolute", top: 2, right: 2, zIndex: 5,
+                                      fontSize: 11, padding: "0 6px", borderRadius: 6,
+                                      border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb",
+                                    }}
+                                    title="Cost"
+                                  >
+                                    {c.cost}
+                                  </div>
                                   {typeof c.strength === "number" && c.strength !== 0 && (
                                     <div
                                       style={{
@@ -1172,6 +1211,7 @@ export default function App() {
                                       >+</button>
                                     </div>
                                   )}
+
                                   {c.label}
                                 </div>
                               </div>
@@ -2018,15 +2058,18 @@ function FateDiscardModal({
   );
 }
 function LocationActions({
-  locIndex,
+  actions,
+  topSlots = 0,
+  hasTopCover,
   locked,
   isActive, // your turn + viewing self + not locked
 }: {
-  locIndex: number;
+  actions: ActionKind[];
+  topSlots?: number;
+  hasTopCover: boolean;
   locked?: boolean;
   isActive: boolean;
 }) {
-  const actions = DEFAULT_LOC_ACTIONS[locIndex] ?? [];
   const baseOpacity = locked ? 0.45 : isActive ? 1 : 0.75;
 
   return (
@@ -2053,23 +2096,27 @@ function LocationActions({
       {actions.length === 0 ? (
         <span style={{ fontSize: 12, color: "#94a3b8" }}>No actions</span>
       ) : (
-        actions.map((a) => (
-          <span
-            key={a}
-            style={{
-              fontSize: 12,
-              lineHeight: 1,
-              padding: "4px 8px",
-              borderRadius: 999,
-              border: "1px solid #475569",
-              background: "#111827",
-              color: "#e5e7eb",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {ACTION_LABELS[a]}
-          </span>
-        ))
+        actions.map((a, idx) => {
+          const blocked = hasTopCover && idx < topSlots; // 👈 first topSlots turn red if any Top cards
+          return (
+            <span
+              key={`${a}-${idx}`}
+              style={{
+                fontSize: 12,
+                lineHeight: 1,
+                padding: "4px 8px",
+                borderRadius: 999,
+                border: `1px solid ${blocked ? "#7f1d1d" : "#475569"}`,
+                background: "#111827",
+                color: blocked ? "#f87171" : "#e5e7eb",
+                whiteSpace: "nowrap",
+              }}
+              title={blocked ? "Blocked by Hero (Top covered)" : "Action"}
+            >
+              {ACTION_LABELS[a]}
+            </span>
+          );
+        })
       )}
       {locked && (
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#fca5a5" }}>🔒 Locked</span>

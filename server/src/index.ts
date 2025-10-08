@@ -1,9 +1,9 @@
 import {Server} from "socket.io";
 import {nanoid} from "nanoid";
 
-type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?: boolean};
+type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?: boolean; actions?: ActionKind[]; topSlots?: number};
 type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, Location]}
-type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; strength?: number;};
+type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; desc?: string; cost: number; baseStrength?: number | null; strength?: number;};
 type Zones = {deck: Card[]; hand: Card[]; discard: Card[]; fateDeck: Card[]; fateDiscard: Card[]};
 type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number; won?: boolean;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
@@ -38,6 +38,25 @@ type ActionEntry = {
 };
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: ActionType | "undo"; text: string}
 type FateSession = {actorId: string; targetId: string; drawn: Card[]; chosenId?: string};
+type ActionKind =
+  | "gain1" | "gain2" | "gain3"
+  | "play"
+  | "draw2"
+  | "fate"
+  | "discard"
+  | "moveItemAlly"
+  | "moveHero"
+  | "vanquish"
+  | "activate";
+type CardTemplate = {label: string; description?: string; cost?: number| null; strength?: number| null; copies?: number};
+type LocationTemplate = {name: string; actions: ActionKind[]; topSlots?: number;}
+type CharacterTemplate = {id: string; name: string; deck: CardTemplate[]; fateDeck: CardTemplate[]; locations: LocationTemplate[]}
+type CharacterPreview = {
+  id: string;
+  name: string;
+  locations: { name: string; actions: ActionKind[]; topSlots?: number }[];
+};
+
 
 const PORT = Number(process.env.PORT ?? 3001);
 const io = new Server(PORT, {
@@ -45,6 +64,68 @@ const io = new Server(PORT, {
 });
 const rooms = new Map<string, Room>();
 const MAX_POWER = 50;
+
+const CHARACTERS_DATA: readonly [
+  CharacterTemplate,
+  ...CharacterTemplate[]
+] = [
+  {
+    id: "maleficent",
+    name: "Maleficent",
+    locations: [
+      { name: "Forbidden Mountains", actions: ["moveItemAlly", "play", "gain1", "fate"] },
+      { name: "Briar Rose's Cottage", actions: ["gain2", "moveItemAlly", "play", "discard"] },
+      { name: "The Forest", actions: ["discard", "play", "gain3", "play"] },
+      { name: "King Stefan's Castle", actions: ["gain1", "fate", "vanquish", "play"] },
+    ],
+    deck: [
+      { label: "Cackling Goon", description: "Cackling Goon gets +1 Strength for each Hero at his location.", cost: 1, strength: 1, copies: 3 },
+      { label: "Dragon Form", description: "Defeat a Hero with a Strength of 3 or less. If a Fate action targets you before your next turn, gain 3 Power.", cost: 3, strength: null, copies: 3 },
+      { label: "Forest of Thorns", description: "Heroes must have a Strength of 4 or more to be played to this location. Discard this Curse when a Hero is played to this location", cost: 2, strength: null, copies: 3 },
+      { label: "Green Fire", description: "Heroes cannot be played to this location. Discard this Curse if Maleficent moves to this location.", cost: 3, strength: null, copies: 3},
+      { label: "Savage Goon", description: "No additional Ability", cost: 3, strength: 4, copies: 3},
+      { label: "Sinister Goon", description: "Sinister Goon gets +1 Strength if there are any Curses at his location.", cost: 2, strength: 3, copies: 3},
+      { label: "Vanish", description: "On your next turn, Maleficent does not have to move to a new location", cost: 0, strength: null, copies: 3},
+    ],
+    fateDeck: [
+      { label: "Guards", description: "When performing a Vanquish action to defeat Guards, at least two Allies must be used", cost: null, strength: 3, copies: 3},
+      { label: "Sword of Truth", description: "When Sword of Truth is played attach it to a Hero with no other attached Items. That Hero gets +2 Strength. The Cost to play a Curse to this location is increased by 2 Power", cost: null, strength: 2, copies: 3},
+      { label: "Once Upon a Dream", description: "Discard a Curse from a location in Maleficent's Realm that has a Hero.", cost: null, strength: null, copies: 2},
+    ],
+  },
+  {
+    id: "captain",
+    name: "Captain Hook",
+    locations: [
+      { name: "Jolly Roger", actions: ["gain1", "discard", "vanquish", "play"] },
+      { name: "Skull Rock", actions: ["gain1", "play", "fate", "discard"] },
+      { name: "Mermaid Lagoon", actions: ["play", "moveItemAlly", "gain3", "play"] },
+      { name: "Hangman's Tree", actions: ["fate", "gain2", "moveHero", "play"] },
+    ],
+    deck: [
+      { label: "Boarding Party", description: "When performing a Vanquish action, Boarding Party may be used to defeat a Hero at their location or at an adjacent unlocked location.", cost: 2, strength: 2, copies: 3 },
+      { label: "Give Them a Scare", description: "Look at the top two cards of your Fate deck. Either discard both cards or return them to the top in any order.", cost: 1, strength: null, copies: 3},
+      { label: "Swashbuckler", description: "No additional Ability.", cost: 1, strength: 2, copies: 3},
+      { label: "Worthy Opponent", description: "Gain 2 Power. Reveal cards from the top of your Fate deck until you reveal a Hero. Play that Hero and discard the rest.", cost: 0, strength: null, copies: 3},
+    ],
+    fateDeck: [
+      { label: "Pixie Dust", description: "When Pixie Dust is played, attach it to a Hero. That Hero gets +2 Strength", cost: null, strength: 2, copies: 3},
+      { label: "Lost Boys", description: "When performing a Vanquish action to defeat Lost Boys, at least two Allies must be used.", cost: null, strength: 4, copies: 2},
+      { label: "Splitting Headache", description: "Discard an Item from Captain Hook's Realm", cost: null, strength: null, copies: 2},
+      { label: "Taunt", description: "When Taunt is played, attach it to a Hero. Captain Hook must defeat Heroes with Taunt before defeating other Heroes.", cost: null, strength: null, copies: 2},
+    ],
+  },
+];
+
+type CharacterId = (typeof CHARACTERS_DATA)[number]["id"];
+
+
+const CHARACTERS = CHARACTERS_DATA.reduce((acc, c) => {
+  acc[c.id as CharacterId] = c;
+  return acc;
+}, {} as { [K in CharacterId]: CharacterTemplate });
+
+const DEFAULT_CHARACTER_ID: CharacterId = CHARACTERS_DATA[0].id;
 
 function newRoomId(){
     return nanoid(6);
@@ -58,42 +139,59 @@ function allReady(room: Room){
     return room.players.length >= 1 && room.players.every(p => p.ready);
 }
 
-function emitRoomState(io: Server, roomId: string){
-    const room = rooms.get(roomId);
-    if (!room) return;
-    const publicPlayers = room.players.map(p => ({
-        id: p.id,
-        name: p.name,
-        ready: p.ready,
-        characterId: p.characterId,
-        power: p.power,
-        //public zones: counts only for hidden zones, full list for board
-        counts: {
-            deck: p.zones.deck.length,
-            hand: p.zones.hand.length,
-            discard: p.zones.discard.length,
-            fateDeck: p.zones.fateDeck.length,
-            fateDiscard: p.zones.fateDiscard.length,
-        },
-        discardTop: p.zones.discard.length ? p.zones.discard[p.zones.discard.length - 1] : null,
-        board: {
-            moverAt: p.board.moverAt,
-            locations: p.board.locations.map(loc => ({
-                id: loc.id,
-                name: loc.name,
-                locked: !!loc.locked,
-                top: loc.top,       // public
-                bottom: loc.bottom, // public
-            })),
-        },
+function emitRoomState(io: Server, roomId: string) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  const publicPlayers = room.players.map((p) => {
+    const deck        = p.zones?.deck         ?? [];
+    const hand        = p.zones?.hand         ?? [];
+    const discard     = p.zones?.discard      ?? [];
+    const fateDeck    = p.zones?.fateDeck     ?? [];
+    const fateDiscard = p.zones?.fateDiscard  ?? [];
+
+    const board = p.board ?? { moverAt: 0, locations: [] as any };
+    const locations = (board.locations ?? []).map((loc: any, idx: number) => ({
+      id: loc?.id ?? `L${idx + 1}`,
+      name: loc?.name ?? `Location ${idx + 1}`,
+      locked: !!loc?.locked,
+      actions: Array.isArray(loc?.actions) ? loc.actions : [],
+      topSlots: typeof loc?.topSlots === "number" ? loc.topSlots : 0,
+      top: Array.isArray(loc?.top) ? loc.top : [],
+      bottom: Array.isArray(loc?.bottom) ? loc.bottom : [],
     }));
-    io.to(roomId).emit("room:state", {
-        roomId: room.id,
-        ownerId: room.ownerId,
-        players: publicPlayers,
-        game: room.game,
-    });
-    emitPrivateStates(io, roomId);
+
+    const discardTop = discard.length ? discard[discard.length - 1] : null;
+
+    return {
+      id: p.id,
+      name: p.name,
+      ready: !!p.ready,
+      characterId: (p.characterId as CharacterId) || DEFAULT_CHARACTER_ID,
+      won: !!(p as any).won,
+      counts: {
+        deck: deck.length,
+        hand: hand.length,
+        discard: discard.length,
+        fateDeck: fateDeck.length,
+        fateDiscard: fateDiscard.length,
+      },
+      discardTop,
+      board: {
+        moverAt: typeof board.moverAt === "number" ? board.moverAt : 0,
+        locations,
+      },
+    };
+  });
+
+  io.to(roomId).emit("room:state", {
+    roomId: room.id,
+    ownerId: room.ownerId,
+    players: publicPlayers,
+    game: room.game,
+  });
+
+  emitPrivateStates(io, roomId);
 }
 
 function emitPrivateStates(io: Server, roomId: string) {
@@ -180,30 +278,6 @@ function shuffle<T>(arr: T[]): void {
     arr[i] = arr[j]!;
     arr[j] = tmp;
   }
-}
-
-function makeStarterDeck(ownerName: string, n = 15): Card[] {
-  const cards: Card[] = [];
-  for (let i = 1; i <= n; i++) {
-    cards.push({
-      id: `${nanoid(8)}`,
-      label: `${ownerName} ${i}`, //placeholder
-      faceUp: false
-    });
-  }
-  shuffle(cards);
-  return cards;
-}
-
-function seedFateDeckFor(p: Player) {
-  const cards: Card[] = Array.from({ length: 12 }, (_, i) => ({
-    id: nanoid(8),
-    label: `Fate Card ${i + 1}`,
-    faceUp: true,       // revealed when drawn; can stay true
-  }));
-  shuffle(cards);
-  p.zones.fateDeck = cards;
-  p.zones.fateDiscard = [];
 }
 
 function reshuffleFromDiscardIntoDeck(p: Player): boolean {
@@ -448,7 +522,59 @@ function advanceToNextActive(room: Room): void {
   room.game.activePlayerId = null;
 }
 
+function expandDeck(templates: CardTemplate[]): Card[] {
+  const out: Card[] = [];
+  for (const t of templates) {
+    const n = t.copies ?? 1;
+    for (let i = 0; i < n; i++) {
+      out.push({
+        id: nanoid(8),
+        label: t.label,
+        faceUp: false,
+        desc: t.description ?? "",
+        cost: t.cost ?? 0,                 // cost always set
+        baseStrength: t.strength ?? null,  // printed value or null
+        strength: 0,                       // start with no adjustments
+        locked: false,
+      });
+    }
+  }
+  return out;
+}
 
+function makeBoardFrom(locTpls: LocationTemplate[]): Board {
+  const get = (i: number): LocationTemplate =>
+    locTpls[i] ?? { name: `Location ${i + 1}`, actions: [], topSlots: 0 };
+
+  const mk = (i: number, id: string): Location => {
+    const t = get(i);
+    return {
+      id,
+      name: t.name,
+      locked: false,
+      top: [],
+      bottom: [],
+      actions: t.actions,
+      topSlots: (t.topSlots ?? Math.min(2, t.actions.length)),
+    };
+  };
+
+  const l0 = mk(0, "L1");
+  const l1 = mk(1, "L2");
+  const l2 = mk(2, "L3");
+  const l3 = mk(3, "L4");
+
+  return { moverAt: 0, locations: [l0, l1, l2, l3] };
+}
+
+function isCharacterId(x: string | null | undefined): x is CharacterId {
+  return !!x && (x in CHARACTERS);
+}
+
+function getCharacter(id: string | null | undefined): CharacterTemplate {
+  const key: CharacterId = isCharacterId(id) ? id : DEFAULT_CHARACTER_ID;
+  return CHARACTERS[key]!;
+}
 
 
 io.on("connection", (socket) => {
@@ -504,7 +630,7 @@ io.on("connection", (socket) => {
         }
         //avoid dupes
         if (!room.players.some(p => p.id === socket.id)) {
-            room.players.push({id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand: [], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0,});
+            room.players.push({id: socket.id, name, ready: false, characterId: DEFAULT_CHARACTER_ID, zones: {deck: [], hand: [], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0,});
             if (!room.game.activePlayerId && room.players.length > 0) {
                 const first = room.players[0]
                 if (first) room.game.activePlayerId = first.id;
@@ -566,18 +692,18 @@ io.on("connection", (socket) => {
         if (!room) return ack?.({ ok: false, error: "room not found" });
         if (room.game.phase !== "lobby") return ack?.({ ok: false, error: "not in lobby" });
 
-        const c = (payload?.characterId ?? "").trim().slice(0, 40);
-        if (!c) return ack?.({ ok: false, error: "character required" });
+        const id = (payload?.characterId || "").trim();
+        if (!id || !(id in CHARACTERS)) return ack?.({ ok: false, error: "invalid character id" });
 
         const me = room.players.find(p => p.id === socket.id);
         if (!me) return ack?.({ ok: false, error: "player not found" });
 
-        me.characterId = c;
+        me.characterId = id;
         ack?.({ ok: true });
         emitRoomState(io, roomId);
+        console.log("chooseCharacter", socket.id, "→", id, "ok:", id in CHARACTERS);
 
-        // optional: system message
-        const sys: ChatMsg = { id: nanoid(8), ts: Date.now(), playerId: "system", name: "System", text: `${me.name} chose ${c}` };
+        const sys: ChatMsg = { id: nanoid(8), ts: Date.now(), playerId: "system", name: "System", text: `${me.name} chose ${id}` };
         room.messages.push(sys); room.messages = room.messages.slice(-100);
         io.to(roomId).emit("chat:msg", { roomId, msg: sys });
     });
@@ -606,13 +732,15 @@ io.on("connection", (socket) => {
         if (!allReady(room)) return ack?.({ ok: false, error: "not all ready" });
 
         for (const p of room.players) {
-            p.zones.deck = makeStarterDeck(p.name, 15);
-            p.zones.hand = [];
-            p.zones.discard = [];
-            seedFateDeckFor(p);
-            // reset / label board for the run (keeps ids stable)
-            p.board = makeEmptyBoard();
-            // if (p.characterId === 'warlord') { p.board.locations[0].name = 'camp'; ... }
+          const ch = getCharacter(p.characterId);
+          p.board = makeBoardFrom(ch.locations);
+          p.zones.deck = expandDeck(ch.deck);
+          p.zones.discard = [];
+          p.zones.fateDeck = expandDeck(ch.fateDeck);
+          p.zones.fateDiscard = [];
+          p.zones.hand = [];
+          shuffle(p.zones.deck);
+          shuffle(p.zones.fateDeck);
         }
 
         //transition to playing
@@ -1555,7 +1683,7 @@ io.on("connection", (socket) => {
         text: `${me.name} has claimed victory! 🏆`,
       };
       room.messages.push(msg);
-      
+
       if (room.messages.length > 100) room.messages = room.messages.slice(-100);
       io.to(roomId).emit("chat:msg", { roomId, msg });
 
@@ -1566,6 +1694,15 @@ io.on("connection", (socket) => {
       emitRoomState(io, roomId);
       ack?.({ ok: true });
     });
+    socket.on("meta:getCharacters", (_: unknown, ack?: (res: { ok: boolean; error?: string; characters?: CharacterPreview[] }) => void) => {
+      const characters = Object.values(CHARACTERS).map(c => ({
+        id: c.id,
+        name: c.name,
+        locations: c.locations,
+      }));
+      ack?.({ ok: true, characters });
+    });
+
 
 });
 
