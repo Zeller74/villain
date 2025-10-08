@@ -9,7 +9,7 @@ type Player = {id: string; name: string, ready: boolean; characterId: string | n
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession;};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -32,7 +32,8 @@ type ActionEntry = {
     | { type: "fate_reshuffle"; targetId: string; moved: number}
     | { type: "fate_play"; targetId: string; playedCardId: string; locationIndex: 0|1|2|3; discardedCardId?: string}
     | { type: "move_top"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number }
-    | { type: "fate_discard_top"; cardId: string; locationIndex: 0|1|2|3 };
+    | { type: "fate_discard_top"; cardId: string; locationIndex: 0|1|2|3 }
+    | { type: "fate_discard_both"; targetId: string; cardIds: string[] };
 
   undone?: boolean;
 };
@@ -436,7 +437,19 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${actorName} discarded a top card from L${d.locationIndex + 1}`,
     };
   }
+  if (e.type === "fate_discard_both" && e.data.type === "fate_discard_both") {
+    const d = e.data as Extract<ActionEntry["data"], { type: "fate_discard_both" }>;
+    // get actor + target names like your other branches
+    const actor  = room.players.find(p => p.id === e.actorId);
+    const name   = actor?.name ?? e.actorId.slice(0, 6);
+    let targetName = "player";
+    for (const p of room.players) { if (p.id === d.targetId) { targetName = p.name; break; } }
 
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "fate_discard_both",
+      text: `${name} discarded both fate cards for ${targetName}.`,
+    };
+  }
 
 
   //fallback
@@ -494,32 +507,28 @@ function drawFromFate(p: Player, n: number): Card[] {
   return out;
 }
 
-function advanceToNextActive(room: Room): void {
-  const players = room.players;
-  if (players.length === 0) {
-    room.game.activePlayerId = null;
-    return;
-  }
+function advanceToNextActive(room: Room) : { wrapped: boolean } {
+  const arr = room.players;
+  const n = arr.length;
+  if (n === 0) { room.game.activePlayerId = null; return { wrapped: false }; }
 
-  const curId = room.game.activePlayerId ?? null;
-  const startIdx = curId ? players.findIndex(p => p.id === curId) : -1;
+  const curIdx = room.game.activePlayerId
+    ? arr.findIndex(p => p.id === room.game.activePlayerId)
+    : -1;
 
-  // Try at most N candidates in seating order
-  for (let step = 1; step <= players.length; step++) {
-    // wrap around; when startIdx === -1, first candidate is index 0
-    const idx = (startIdx + step) % players.length;
-    const candidate = players[idx]; // Player | undefined
-
-    // extra guard for TS + explicit winner check
-    if (candidate && candidate.won !== true) {
-      room.game.activePlayerId = candidate.id;
-      room.game.turn += 1;
-      return;
+  for (let step = 1; step <= n; step++) {
+    const idx = (curIdx + step) % n;
+    const p = arr[idx];
+    if (p && !p.won) {
+      room.game.activePlayerId = p.id;
+      const wrapped = curIdx >= 0 ? idx <= curIdx : false;
+      return { wrapped };
     }
   }
 
-  // No eligible players (everyone has won)
+  // everyone won or no valid next
   room.game.activePlayerId = null;
+  return { wrapped: false };
 }
 
 function expandDeck(templates: CardTemplate[]): Card[] {
@@ -763,27 +772,13 @@ io.on("connection", (socket) => {
         const room = rooms.get(roomId);
         if (!room) return ack?.({ ok: false, error: "room not found" });
 
-        //only the active player can end turn
         if (room.game.activePlayerId !== socket.id) {
-        return ack?.({ ok: false, error: "not your turn" });
+          return ack?.({ ok: false, error: "not your turn" });
         }
 
-        const ps = room.players;
-        if (ps.length === 0) return ack?.({ ok: false, error: "no players" });
-
-        //rotate to next player
-        const idx = ps.findIndex(p => p.id === socket.id);
-        if (idx === -1) return ack?.({ ok: false, error: "player not in room" });
-
-        const nextIdx = (idx + 1) % ps.length;
-        const nextPlayer = ps[nextIdx];
-        if (!nextPlayer) return ack?.({ok: false, error: "next player missing"});
-        
-        const wrapped = nextIdx === 0;
-        room.game.activePlayerId = nextPlayer.id;
+        const { wrapped } = advanceToNextActive(room);
         if (wrapped) room.game.turn += 1;
 
-        advanceToNextActive(room);
         ack?.({ ok: true });
         emitRoomState(io, roomId);
     });
@@ -1580,6 +1575,44 @@ io.on("connection", (socket) => {
       // Only the actor needs the actual card back (UI convenience)
       return ack?.({ ok: true, card });
     });
+    socket.on("fate:discardBoth", (_: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (!room.fate || room.fate.actorId !== socket.id) {
+        return ack?.({ ok: false, error: "no active fate" });
+      }
+
+      const sess = room.fate;
+      const target = room.players.find(p => p.id === sess.targetId);
+      if (!target) { delete room.fate; emitRoomState(io, roomId); return ack?.({ ok: true }); }
+
+      if (sess.drawn.length < 2) {
+        return ack?.({ ok: false, error: "need two fate cards to discard both" });
+      }
+
+      // Move both drawn cards into fate discard (face-up)
+      const ids: string[] = [];
+      for (const c of sess.drawn) {
+        c.faceUp = true;
+        target.zones.fateDiscard.push(c);
+        ids.push(c.id);
+      }
+
+      // log
+      room.log.push({
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "fate_discard_both",
+        data: { type: "fate_discard_both", targetId: target.id, cardIds: ids },
+      });
+
+      delete room.fate;
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
     socket.on("board:moveTop", (payload: {cardId?: string; from?: number; to?: number} | undefined, ack?: (res: {ok: boolean; error?: string}) => void) => {
       const roomId = socket.data.roomId as string | null;
       if (!roomId) return ack?.({ ok: false, error: "not in a room" });
@@ -1688,7 +1721,8 @@ io.on("connection", (socket) => {
       io.to(roomId).emit("chat:msg", { roomId, msg });
 
       if (room.game.activePlayerId === me.id) {
-        advanceToNextActive(room);
+        const { wrapped } = advanceToNextActive(room);
+        if (wrapped) room.game.turn += 1;
       }
 
       emitRoomState(io, roomId);
@@ -1702,6 +1736,7 @@ io.on("connection", (socket) => {
       }));
       ack?.({ ok: true, characters });
     });
+
 
 
 });

@@ -523,6 +523,18 @@ export default function App() {
     });
   };
 
+  const discardBothFate = () => {
+    const s = sockRef.current!;
+    s.emit("fate:discardBoth", {}, (res?: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Discard both failed");
+      // clear local fate UI
+      setFateChoices([]);
+      setFateTargetId(null);
+      setFatePlacing(null);
+    });
+  };
+
+
   const catById = useMemo(
     () => Object.fromEntries(catalog.map(c => [c.id, c] as const)),
     [catalog]
@@ -540,6 +552,8 @@ export default function App() {
   const canUndo = !!(lastLog && myId && lastLog.actorId === myId && lastLog.type !== "undo" && room?.game.phase === "playing");
   const canTakeFromThisDiscard = !!(focusPlayer && myId && focusPlayer.id === myId && isMyTurn);
   const viewingSelf = !!(myId && focusPlayerId === myId);
+  const canActOnBoard = phase === "playing" && isMyTurn && viewingSelf;
+  const canUseFateBar = phase === "playing" && isMyTurn && viewingSelf;
   
 
 
@@ -1243,6 +1257,7 @@ export default function App() {
             cards={fateChoices}
             onPlay={chooseFateCard}
             onCancel={cancelFate}
+            onDiscardBoth={fateChoices.length >= 2 ? discardBothFate : undefined}
           />
 
           <FatePlaceBanner placing={fatePlacing} />
@@ -1709,6 +1724,13 @@ function InfoBar({
   const viewingSelf = focusPlayer.id === myId;
   const power = typeof focusPlayer.power === "number" ? focusPlayer.power : 0;
 
+  const statusText =
+    phase !== "playing"
+      ? (phase === "lobby" ? "Lobby" : "Ended")
+      : isMyTurn
+        ? (viewingSelf ? "Your turn" : "Your turn (spectating)")
+        : "Waiting…";
+
   return (
     <div
       style={{
@@ -1730,19 +1752,13 @@ function InfoBar({
       <span style={{ opacity: 0.8 }}>Power: {power}</span>
       
 
-      {viewingSelf && phase === "playing" && (
+      {viewingSelf && isMyTurn && phase === "playing" && (
         <div style={{ display: "flex", gap: 6, marginLeft: 6 }}>
           <button onClick={() => onChangePower(-1)} disabled={!isMyTurn && power <= 0}>-1</button>
           <button onClick={() => onChangePower(+1)}>+1</button>
         </div>
       )}
-      <span style={{ marginLeft: "auto", opacity: 0.8 }}>
-        {phase === "playing"
-          ? (isMyTurn ? "Your turn" : "Waiting…")
-          : phase === "lobby"
-          ? "Lobby"
-          : "Ended"}
-      </span>
+      <span style={{ marginLeft: "auto", opacity: 0.8 }}>{statusText}</span>
     </div>
   );
 }
@@ -1774,7 +1790,8 @@ function FateBar({
   // local UI for the target picker
   const [pickOpen, setPickOpen] = useState(false);
 
-  const canAct = phase === "playing" && isMyTurn;
+  const canAct = phase === "playing" && isMyTurn && viewingSelf;
+  const disabledReason = !isMyTurn ? "Not your turn" : (!viewingSelf ? "Switch to your board to act" : undefined);
 
   return (
     <div
@@ -1806,7 +1823,7 @@ function FateBar({
         <button
           onClick={() => setPickOpen(v => !v)}
           disabled={!canAct}
-          title={canAct ? "Choose a player to Fate (self allowed)" : "Your turn required"}
+          title={canAct ? "Choose a player to Fate (self allowed)" : (disabledReason || "Disabled")}
         >
           Fate…
         </button>
@@ -1860,18 +1877,14 @@ function FateBar({
       <button
         onClick={() => onReshuffleFate(focusPlayer.id)}
         disabled={!canAct || fateDisc === 0}
-        title={fateDisc === 0 ? "Fate discard is empty" : "Shuffle fate discard into fate deck"}
+        title={
+          !canAct
+            ? (disabledReason || "Disabled")
+            : (fateDisc === 0 ? "Fate discard is empty" : "Shuffle fate discard into fate deck")
+        }
       >
         Shuffle Discard
       </button>
-
-      <span style={{ marginLeft: "auto", opacity: 0.75 }}>
-        {phase === "playing"
-          ? (isMyTurn ? "Your turn" : "Waiting…")
-          : phase === "lobby"
-          ? "Lobby"
-          : "Ended"}
-      </span>
     </div>
   );
 }
@@ -1880,11 +1893,13 @@ function FatePanel({
   cards,
   onPlay,
   onCancel,
+  onDiscardBoth,
 }: {
   open: boolean;
   cards: Card[];
   onPlay: (card: Card) => void;
   onCancel: () => void;
+  onDiscardBoth?: () => void;
 }) {
   if (!open) return null;
   return (
@@ -1901,6 +1916,15 @@ function FatePanel({
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <strong>Fate: choose a card to play</strong>
         <span style={{ marginLeft: "auto" }} />
+        {onDiscardBoth && cards.length >= 2 && (   // ✅ use props, not outer vars
+          <button
+            onClick={onDiscardBoth}
+            title="Send both revealed fate cards to discard"
+            style={{ marginLeft: 6 }}
+          >
+            Discard Both
+          </button>
+        )}
         <button onClick={onCancel}>Cancel</button>
       </div>
 
