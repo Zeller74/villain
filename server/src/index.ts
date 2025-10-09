@@ -10,7 +10,7 @@ type Player = {id: string; name: string, ready: boolean; characterId: string | n
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession;};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -34,7 +34,8 @@ type ActionEntry = {
     | { type: "fate_play"; targetId: string; playedCardId: string; locationIndex: 0|1|2|3; discardedCardId?: string}
     | { type: "move_top"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number }
     | { type: "fate_discard_top"; cardId: string; locationIndex: 0|1|2|3 }
-    | { type: "fate_discard_both"; targetId: string; cardIds: string[] };
+    | { type: "fate_discard_both"; targetId: string; cardIds: string[] }
+    | { type: "play_effect"; cardId: string };
 
   undone?: boolean;
 };
@@ -451,6 +452,27 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} discarded both fate cards for ${targetName}.`,
     };
   }
+  if (e.type === "play_effect" && e.data.type === "play_effect") {
+    const name = room.players.find(p => p.id === e.actorId)?.name ?? e.actorId.slice(0, 6);
+    const cardId = e.data.cardId;
+    // Try to find label in player piles (discard is most likely)
+    let label = "a card";
+    for (const p of room.players) {
+      const inDiscard = p.zones.discard.find(c => c.id === cardId);
+      const inHand = p.zones.hand.find(c => c.id === cardId);
+      const onBoard = p.board.locations.some(loc =>
+        loc.bottom.some(c => c.id === cardId) || loc.top.some(c => c.id === cardId)
+      );
+      if (inDiscard) { label = inDiscard.label; break; }
+      if (inHand)    { label = inHand.label; break; }
+      if (onBoard)   { label = "(board card)"; break; }
+    }
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "play_effect",
+      text: `${name} played ${label} (effect)`,
+    };
+  }
+
 
 
   //fallback
@@ -1080,6 +1102,14 @@ io.on("connection", (socket) => {
 
         list[j]!.strength = d.prev;
         return ack?.({ ok: true });
+      } else if (last.type === "play_effect" && last.data.type === "play_effect") {
+        const d = last.data as Extract<ActionEntry["data"], { type: "play_effect" }>;
+        const cardId = d.cardId;
+        const j = me.zones.discard.findIndex(c => c.id === cardId);
+        if (j === -1) return ack?.({ ok: false, error: "card not in discard" });
+        const card = me.zones.discard.splice(j, 1)[0]!;
+        card.faceUp = false;
+        me.zones.hand.push(card);
       } else {
         return ack?.({ ok: false, error: "unsupported undo" });
       }
@@ -1738,7 +1768,47 @@ io.on("connection", (socket) => {
       }));
       ack?.({ ok: true, characters });
     });
+    socket.on("game:playEffect", (payload: { cardId: string }, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok: false, error: "not your turn" });
 
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+
+      const cardId = (payload?.cardId ?? "").trim();
+      if (!cardId) return ack?.({ ok: false, error: "no card specified" });
+
+      const card = me.zones.hand.find(c => c.id === cardId);
+      if (!card) return ack?.({ ok: false, error: "card not in hand" });
+
+      if (card.type !== "Effect" && card.type !== "Condition") {
+        return ack?.({ ok: false, error: "only effects/conditions can be played this way" });
+      }
+
+      const idx = me.zones.hand.findIndex(c => c.id === cardId);
+      if (idx < 0) return ack?.({ ok: false, error: "card not in hand" });
+      const removed = me.zones.hand.splice(idx, 1);
+      const taken = removed[0];
+      if (!taken) return ack?.({ ok: false, error: "failed to remove card" });
+
+      taken.faceUp = true;
+      me.zones.discard.push(taken);   // taken is Card, not undefined
+
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: me.id,
+        type: "play_effect",
+        data: { type: "play_effect", cardId: taken.id },
+      });
+
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
 
 
 });

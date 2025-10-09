@@ -545,6 +545,14 @@ export default function App() {
     });
   };
 
+  const getSelectedSingleEffect = (hand: Card[], ids: Set<string>) => {
+    if (ids.size !== 1) return null;
+    const id = Array.from(ids)[0];
+    const c = hand.find(x => x.id === id);
+    if (!c) return null;
+    return (c.type === "Effect" || c.type === "Condition") ? c : null;
+  }
+
 
   const catById = useMemo(
     () => Object.fromEntries(catalog.map(c => [c.id, c] as const)),
@@ -563,8 +571,8 @@ export default function App() {
   const canUndo = !!(lastLog && myId && lastLog.actorId === myId && lastLog.type !== "undo" && room?.game.phase === "playing");
   const canTakeFromThisDiscard = !!(focusPlayer && myId && focusPlayer.id === myId && isMyTurn);
   const viewingSelf = !!(myId && focusPlayerId === myId);
-  const canActOnBoard = phase === "playing" && isMyTurn && viewingSelf;
-  const canUseFateBar = phase === "playing" && isMyTurn && viewingSelf;
+  const selectedEffect = getSelectedSingleEffect(myHand, selectedIds);
+
   
 
 
@@ -863,10 +871,15 @@ export default function App() {
 
             {focusPlayer && (
               <>
-              <DiscardPeek
-                player={focusPlayer}
+              <FateBar
+                focusPlayer={focusPlayer}
                 myId={myId}
-                onOpen={() => openDiscard(focusPlayer.id)}
+                isMyTurn={isMyTurn}
+                phase={room?.game.phase ?? "lobby"}
+                players={room?.players ?? []}
+                onStartFate={startFateFor}
+                onReshuffleFate={reshuffleFateDiscardFor}
+                onOpenFateDiscard={openFateDiscardFor}
               />
               <div
                 style={{
@@ -1096,16 +1109,25 @@ export default function App() {
             )}
           </div>
           
-          <FateBar
-            focusPlayer={focusPlayer ?? null}
-            myId={myId}
-            isMyTurn={isMyTurn}
-            phase={room?.game.phase ?? "lobby"}
-            players={room?.players ?? []}
-            onStartFate={startFateFor}
-            onReshuffleFate={reshuffleFateDiscardFor}
-            onOpenFateDiscard={openFateDiscardFor}
-          />
+          <div style={{ marginTop: 12 }}>
+            {focusPlayer && (
+              <DiscardPeek
+                player={focusPlayer}
+                myId={myId}
+                onOpen={() => openDiscard(focusPlayer.id)}
+                onReshuffle={
+                viewingSelf && isMyTurn
+                  ? () => {
+                      const s = sockRef.current!;
+                      s.emit("pile:reshuffle", (res: { ok: boolean; error?: string }) => {
+                        if (!res?.ok) setLastError(res?.error || "Reshuffle failed");
+                      });
+                    }
+                  : undefined
+              }
+              />
+            )}
+          </div>
 
           <FatePanel
             open={!!fateTargetId && fateChoices.length > 0 && !fatePlacing}
@@ -1128,6 +1150,7 @@ export default function App() {
             }}
           >
             {focusPlayer ? (
+          
               <>
                 {/* Header: shows whose hand we’re viewing + counts for that player */}
                 <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -1144,6 +1167,7 @@ export default function App() {
                   {/* Controls appear ONLY when viewing self */}
                   {focusPlayerId === myId && (
                     <>
+
                       <button onClick={drawOne} disabled={!isMyTurn} style={{ marginLeft: 8 }}>
                         Draw 1
                       </button>
@@ -1154,11 +1178,19 @@ export default function App() {
                         Discard{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
                       </button>
                       <button
-                        onClick={reshuffleDiscard}
-                        disabled={!isMyTurn || (room?.players.find(p => p.id === myId)?.counts?.discard ?? 0) === 0}
-                        title="Shuffle your discard into your deck"
+                        onClick={() => {
+                          if (!selectedEffect) return;
+                          const s = sockRef.current!;
+                          s.emit("game:playEffect", { cardId: selectedEffect.id }, (res: { ok: boolean; error?: string }) => {
+                            if (!res?.ok) return setLastError(res?.error || "Play effect failed");
+                            // clear selection on success
+                            setSelectedIds(new Set());
+                          });
+                        }}
+                        disabled={!isMyTurn || !selectedEffect}
+                        title={selectedEffect ? "Resolve this effect and discard it" : "Select exactly one effect/condition in your hand"}
                       >
-                        Shuffle Discard
+                        Play Effect
                       </button>
                     </>
                   )}
@@ -1397,10 +1429,12 @@ function DiscardPeek({
   player,
   myId,
   onOpen,
+  onReshuffle,
 }: {
   player: Player | null;
   myId: string | null;
   onOpen: () => void;
+  onReshuffle?: () => void;
 }) {
   const count = player?.counts?.discard ?? 0;
   const topLabel = player?.discardTop?.label ?? "—";
@@ -1438,6 +1472,16 @@ function DiscardPeek({
       </span>
 
       <span style={{ marginLeft: "auto" }} />
+      {typeof onReshuffle === "function" && (
+        <button
+          onClick={onReshuffle}
+          disabled={count === 0}
+          title={count === 0 ? "Discard is empty" : "Shuffle discard into deck"}
+          style={{ marginRight: 6 }}
+        >
+          Shuffle Discard
+        </button>
+      )}
       <button onClick={onOpen} disabled={count === 0}>
         Open Discard
       </button>
