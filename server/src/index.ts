@@ -9,8 +9,8 @@ type Zones = {deck: Card[]; hand: Card[]; discard: Card[]; fateDeck: Card[]; fat
 type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number; won?: boolean;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
-type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession;};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect";
+type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession; fatePeek?: FatePeekSession};
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -35,12 +35,14 @@ type ActionEntry = {
     | { type: "move_top"; cardId: string; from: 0|1|2|3; to: 0|1|2|3; fromIndex: number; toIndex: number }
     | { type: "fate_discard_top"; cardId: string; locationIndex: 0|1|2|3 }
     | { type: "fate_discard_both"; targetId: string; cardIds: string[] }
-    | { type: "play_effect"; cardId: string };
+    | { type: "play_effect"; cardId: string }
+    | { type: "fate_peek"; targetId: string; count: number};
 
   undone?: boolean;
 };
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: ActionType | "undo"; text: string}
 type FateSession = {actorId: string; targetId: string; drawn: Card[]; chosenId?: string};
+type FatePeekSession = { actorId: string; targetId: string; drawn: Card[]};
 type ActionKind =
   | "gain1" | "gain2" | "gain3"
   | "play"
@@ -89,11 +91,24 @@ const CHARACTERS_DATA: readonly [
       { label: "Savage Goon", type: "Ally", description: "No additional Ability", cost: 3, strength: 4, copies: 3},
       { label: "Sinister Goon", type: "Ally", description: "Sinister Goon gets +1 Strength if there are any Curses at his location.", cost: 2, strength: 3, copies: 3},
       { label: "Vanish", type: "Effect", description: "On your next turn, Maleficent does not have to move to a new location", cost: 0, strength: null, copies: 3},
+      { label: "Dreamless Sleep", type: "Curse", description: "Heroes at this location get -2 Strength. Discard this Curse when an Ally is played to this location.", cost: 3, strength: null, copies: 2},
+      { label: "Malice", type: "Condition", description: "During their turn, if another player defeats a Hero with a Strength of 4 or more, you may play Malice. Defeat a Hero with a Strength of 4 or less.", cost: null, strength: null, copies: 2},
+      { label: "Tyranny", type: "Condition", description: "During their turn, if another player has three or more Allies in their Realm, you may play Tyranny. Draw three crads into your hand, then discard any three cards.", cost: null, strength: null, copies: 2},
+      { label: "Raven", type: "Ally", description: "Before Maleficent moves, you may move Raven to any location and perform one available action at his new location. Raven cannot perform Fate actions.", cost: 3, strength: 1, copies: 1},
+      { label: "Spinning Wheel", type: "Item", description: "If a Hero is defeated at this location, gain Power equal to the Hero's Strength minus 1.", cost: 1, strength: null, copies: 1},
+      { label: "Staff", type: "Item", description: "If Maleficent is at this location, the Cost to play an Effect or Curse is reduced by 1 Power.", cost: 1, strength: null, copies: 1},
     ],
     fateDeck: [
       { label: "Guards", type: "Hero", description: "When performing a Vanquish action to defeat Guards, at least two Allies must be used", cost: null, strength: 3, copies: 3},
       { label: "Sword of Truth", type: "Item", description: "When Sword of Truth is played attach it to a Hero with no other attached Items. That Hero gets +2 Strength. The Cost to play a Curse to this location is increased by 2 Power", cost: null, strength: 2, copies: 3},
       { label: "Once Upon a Dream", type: "Effect", description: "Discard a Curse from a location in Maleficent's Realm that has a Hero.", cost: null, strength: null, copies: 2},
+      { label: "Aurora", type: "Hero", description: "When Aurora is played, reveal the top card of Maleficent's Fate deck. If it is a Hero, play it. Otherwise return it to the top of the deck.", cost: null, strength: 4, copies: 1},
+      { label: "Fauna", type: "Hero", description: "When Fauna is played, you may discard Dreamless Sleep from her location.", cost: null, strength: 2, copies: 1},
+      { label: "Flora", type: "Hero", description: "When Flora is played, Maleficent must reveal her hand. Until Flora is defeated. Maleficent must play with her hand revealed.", cost: null, strength: 3, copies: 1},
+      { label: "King Hubert", type: "Hero", description: "When King Hubert is played, you may move one Ally from each adjacent location to his location", cost: null, strength: 3, copies: 1},
+      { label: "King Stefan", type: "Hero", description: "When King Stefan is played, you may move Maleficent to any location.", cost: null, strength: 4, copies: 1},
+      { label: "Merryweather", type: "Hero", description: "Curses cannot be played to Merryweather's location", cost: null, strength: 4, copies: 1},
+      { label: "Prince Phillip", type: "Hero", description: "When Prince Phillip is played, you may discard all Allies from his location", cost: null, strength: 5, copies: 1},
     ],
   },
   {
@@ -110,12 +125,29 @@ const CHARACTERS_DATA: readonly [
       { label: "Give Them a Scare", type: "Effect", description: "Look at the top two cards of your Fate deck. Either discard both cards or return them to the top in any order.", cost: 1, strength: null, copies: 3},
       { label: "Swashbuckler", type: "Ally", description: "No additional Ability.", cost: 1, strength: 2, copies: 3},
       { label: "Worthy Opponent", type: "Effect", description: "Gain 2 Power. Reveal cards from the top of your Fate deck until you reveal a Hero. Play that Hero and discard the rest.", cost: 0, strength: null, copies: 3},
+      { label: "Aye, Aye, Sir!", type: "Effect", description: "Move an Ally to an adjacent unlocked location", cost: 1, strength: null, copies: 2},
+      { label: "Cannon", type: "Item", description: "This location gains Vanquish.", cost: 2, strength: null, copies: 2},
+      { label: "Cunning", type: "Condition", description: "During their turn, if another player has an Ally with a Strength of 4 or more in their Realm, you may play Cunning. Play an Ally from your hand for free.", cost: null, strength: null, copies: 2},
+      { label: "Cutlass", type: "Item", description: "When Cutlass is played, attach it to an Ally. That Ally gets +2 Strength.", cost: 1, strength: 2, copies: 2},
+      { label: "Hook's Case", type: "Item", description: "This location gains: Gain 1 Power", cost: 2, strength: null, copies: 2},
+      { label: "Obsession", type: "Condition", description: "During their turn, if another player defeats a Hero with a Strength of 4 or more, you may play Obsession. Reveal cards from the top of your Fate deck until you reveal a Hero. Either play or discard that Hero. Discard the rest.", cost: null, strength: null, copies: 2},
+      { label: "Pirate Brute", type: "Ally", description: "No additional Ability.", cost: 3, strength: 4, copies: 2},
+      { label: "Ingenious Device", type: "Item", description: "This location gains: Move Hero", cost: 2, strength: null, copies: 1},
+      { label: "Mr. Starkey", type: "Ally", description: "When Mr. Starkey is played, you may move a Hero from his location to an adjacent unlocked location.", cost: 2, strength: 2, copies: 1},
+      { label: "Never Land Map", type: "Item", description: "When Never Land Map is played, unlock Hangman's Tree. When you play an Item, you may discard Never Land Map instead of paying the Item's Cost.", cost: 4, strength: null, copies: 1},
+      { label: "Smee", type: "Ally", description: "Smee gets +2 Strength if he is at the Jolly Roger", cost: 2, strength: 2, copies: 1},
     ],
     fateDeck: [
       { label: "Pixie Dust", type: "Effect", description: "When Pixie Dust is played, attach it to a Hero. That Hero gets +2 Strength", cost: null, strength: 2, copies: 3},
       { label: "Lost Boys", type: "Hero", description: "When performing a Vanquish action to defeat Lost Boys, at least two Allies must be used.", cost: null, strength: 4, copies: 2},
       { label: "Splitting Headache", type: "Effect", description: "Discard an Item from Captain Hook's Realm", cost: null, strength: null, copies: 2},
       { label: "Taunt", type: "Item", description: "When Taunt is played, attach it to a Hero. Captain Hook must defeat Heroes with Taunt before defeating other Heroes.", cost: null, strength: null, copies: 2},
+      { label: "John", type: "Hero", description: "John gets +1 Strength if he has any Items attached to him.", cost: null, strength: 2, copies: 1},
+      { label: "Michael", type: "Hero", description: "Michael gets +1 Strength for each location in Captain Hook's Realm that has a Hero, including Michael's location", cost: null, strength: 1, copies: 1},
+      { label: "Peter Pan", type: "Hero", description: "When Peter Pan is revealed, you MUST IMMEDIATELY PLAY HIM to Hangman's Tree, even if it is locked. Any other Fate cards revealed during this action are discarded.", cost: null, strength: 8, copies: 1},
+      { label: "Tick Tock", type: "Hero", description: "If Captain Hook moves to Tick Tock's location, Captain Hook must immediately discard his hand.", cost: null, strength: 5, copies: 1},
+      { label: "Tinker Bell", type: "Hero", description: "When Tinker Bell is played, you may discard one Ally from her location.", cost: null, strength: 2, copies: 1},
+      { label: "Wendy", type: "Hero", description: "All other Heroes in Captain Hook's Realm get +1 Strength.", cost: null, strength: 3, copies: 1},
     ],
   },
 ];
@@ -472,8 +504,15 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} played ${label} (effect)`,
     };
   }
-
-
+  if (e.type === "fate_peek" && e.data.type === "fate_peek") {
+    const d = e.data;
+    let targetName = "player";
+    for (const p of room.players) { if (p.id === d.targetId) { targetName = p.name; break; } }
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "fate_peek",
+      text: `${name} arranged the top ${d.count} of ${targetName}'s fate deck`,
+    };
+  }
 
   //fallback
   return {
@@ -608,6 +647,9 @@ function getCharacter(id: string | null | undefined): CharacterTemplate {
   const key: CharacterId = isCharacterId(id) ? id : DEFAULT_CHARACTER_ID;
   return CHARACTERS[key]!;
 }
+
+function nowId() { return nanoid(8); }
+
 
 
 io.on("connection", (socket) => {
@@ -1806,6 +1848,92 @@ io.on("connection", (socket) => {
         data: { type: "play_effect", cardId: taken.id },
       });
 
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
+    socket.on("fatePeek:start", (payload: { targetId: string; count: number }, ack?: (res: { ok: boolean; error?: string; cards?: Card[]; targetName?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok: false, error: "not your turn" });
+
+      if (room.fatePeek && room.fatePeek.actorId !== socket.id) {
+        return ack?.({ ok: false, error: "another peek is active" });
+      }
+
+      const pid = (payload?.targetId || "").trim();
+      const target = room.players.find(p => p.id === pid);
+      if (!target) return ack?.({ ok: false, error: "target not found" });
+
+      const n = Math.max(1, Math.min(Number(payload?.count ?? 2), 5)); // clamp 1..5
+      const drawn: Card[] = [];
+      for (let i = 0; i < n; i++) {
+        const c = target.zones.fateDeck.pop();
+        if (!c) break;
+        drawn.push(c); // drawn[0] is the original top
+      }
+
+      room.fatePeek = { actorId: socket.id, targetId: pid, drawn };
+      ack?.({
+        ok: true,
+        cards: drawn,
+        targetName: target.name
+      });
+    });
+    socket.on("fatePeek:confirm", (payload: { orderIds: string[] }, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      const sess = room.fatePeek;
+      if (!sess || sess.actorId !== socket.id) return ack?.({ ok: false, error: "no active peek" });
+
+      const target = room.players.find(p => p.id === sess.targetId);
+      if (!target) { delete room.fatePeek; return ack?.({ ok: true }); }
+
+      const byId = new Map(sess.drawn.map(c => [c.id, c] as const));
+      const ordered = (payload?.orderIds ?? [])
+        .map(id => byId.get(id))
+        .filter((c): c is Card => !!c);
+
+      if (ordered.length !== sess.drawn.length) {
+        return ack?.({ ok: false, error: "invalid order set" });
+      }
+
+      for (const card of ordered.slice().reverse()) {
+        target.zones.fateDeck.push(card);
+      }
+
+      pushLog(io, roomId, {
+        id: nowId(),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "fate_peek",
+        data: { type: "fate_peek", targetId: target.id, count: ordered.length }
+      });
+
+      delete room.fatePeek;
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
+    socket.on("fatePeek:cancel", (_: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+
+      const sess = room.fatePeek;
+      if (!sess || sess.actorId !== socket.id) return ack?.({ ok: false, error: "no active peek" });
+
+      const target = room.players.find(p => p.id === sess.targetId);
+      if (target) {
+        for (const c of [...sess.drawn].reverse()) {
+          target.zones.fateDeck.push(c);
+        }
+      }
+      delete room.fatePeek;
       emitRoomState(io, roomId);
       ack?.({ ok: true });
     });

@@ -87,6 +87,12 @@ export default function App() {
   const [fateDiscardTarget, setFateDiscardTarget] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<CharacterPreview[]>([]);
   const [pendingCharId, setPendingCharId] = useState<string>("");
+  const [fatePeekOpen, setFatePeekOpen] = useState(false);
+  const [fatePeekTargetId, setFatePeekTargetId] = useState<string | null>(null);
+  const [fatePeekTargetName, setFatePeekTargetName] = useState<string>("");
+  const [fatePeekCards, setFatePeekCards] = useState<Card[]>([]);
+  const [fatePeekOriginal, setFatePeekOriginal] = useState<Card[]>([]);
+
 
 
   useEffect(() => {
@@ -553,11 +559,75 @@ export default function App() {
     return (c.type === "Effect" || c.type === "Condition") ? c : null;
   }
 
-
   const catById = useMemo(
     () => Object.fromEntries(catalog.map(c => [c.id, c] as const)),
     [catalog]
   );
+
+  const startFatePeek = (targetId: string, count: number) => {
+    const s = sockRef.current!;
+    s.emit(
+      "fatePeek:start",
+      { targetId, count },
+      (res: { ok: boolean; error?: string; cards?: Card[]; targetName?: string }) => {
+        if (!res?.ok) return setLastError(res?.error || "Peek failed");
+        setFatePeekTargetId(targetId);
+        setFatePeekTargetName(res.targetName || "Player");
+        setFatePeekOriginal(res.cards || []);
+        setFatePeekCards(res.cards || []);
+        setFatePeekOpen(true);
+      }
+    );
+  };
+
+  const confirmFatePeek = () => {
+    const s = sockRef.current!;
+    s.emit(
+      "fatePeek:confirm",
+      { orderIds: fatePeekCards.map(c => c.id) },
+      (res: { ok: boolean; error?: string }) => {
+        if (!res?.ok) return setLastError(res?.error || "Confirm failed");
+        setFatePeekOpen(false);
+        setFatePeekCards([]);
+        setFatePeekOriginal([]);
+        setFatePeekTargetId(null);
+      }
+    );
+  };
+
+  const cancelFatePeek = () => {
+    const s = sockRef.current!;
+    s.emit("fatePeek:cancel", {}, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Cancel failed");
+      setFatePeekOpen(false);
+      setFatePeekCards([]);
+      setFatePeekOriginal([]);
+      setFatePeekTargetId(null);
+    });
+  };
+
+  const moveUp = (idx: number) => {
+    if (idx <= 0) return;
+    setFatePeekCards(cs => {
+      const a = cs.slice();
+      [a[idx - 1], a[idx]] = [a[idx], a[idx - 1]];
+      return a;
+    });
+  };
+
+  const moveDown = (idx: number) => {
+    setFatePeekCards(cs => {
+      if (idx >= cs.length - 1) return cs;
+      const a = cs.slice();
+      [a[idx], a[idx + 1]] = [a[idx + 1], a[idx]];
+      return a;
+    });
+  };
+
+  const resetPeek = () => {
+    setFatePeekCards(fatePeekOriginal);
+  };
+
 
 
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
@@ -880,6 +950,7 @@ export default function App() {
                 onStartFate={startFateFor}
                 onReshuffleFate={reshuffleFateDiscardFor}
                 onOpenFateDiscard={openFateDiscardFor}
+                onStartPeek={(targetId, count) => startFatePeek(targetId, count)}
               />
               <div
                 style={{
@@ -1118,10 +1189,7 @@ export default function App() {
                 onReshuffle={
                 viewingSelf && isMyTurn
                   ? () => {
-                      const s = sockRef.current!;
-                      s.emit("pile:reshuffle", (res: { ok: boolean; error?: string }) => {
-                        if (!res?.ok) setLastError(res?.error || "Reshuffle failed");
-                      });
+                      reshuffleDiscard();
                     }
                   : undefined
               }
@@ -1153,20 +1221,32 @@ export default function App() {
           
               <>
                 {/* Header: shows whose hand we’re viewing + counts for that player */}
-                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <strong>
-                    {focusPlayerId === myId ? "Your hand" : `${focusPlayer.name}'s hand`}
-                  </strong>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    borderBottom: "1px solid #243244",
+                    paddingBottom: 6,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {/* LEFT: info */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <strong>
+                      {focusPlayerId === myId ? "Your hand" : `${focusPlayer!.name}'s hand`}
+                    </strong>
+                    <span style={{ marginLeft: 8, opacity: 0.8 }}>
+                      Deck: {focusPlayer!.counts?.deck ?? 0}
+                    </span>
+                    <span style={{ opacity: 0.8 }}>· Discard: {focusPlayer!.counts?.discard ?? 0}</span>
+                  </div>
 
-                  {/* Counts are always for the focus player */}
-                  <span style={{ marginLeft: 8, opacity: 0.8 }}>
-                    Deck: {focusPlayer.counts?.deck ?? 0}
-                  </span>
-                  <span style={{ opacity: 0.8 }}>· Discard: {focusPlayer.counts?.discard ?? 0}</span>
+                  <span style={{ marginLeft: "auto" }} />
 
                   {/* Controls appear ONLY when viewing self */}
                   {focusPlayerId === myId && (
-                    <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
 
                       <button onClick={drawOne} disabled={!isMyTurn} style={{ marginLeft: 8 }}>
                         Draw 1
@@ -1183,7 +1263,6 @@ export default function App() {
                           const s = sockRef.current!;
                           s.emit("game:playEffect", { cardId: selectedEffect.id }, (res: { ok: boolean; error?: string }) => {
                             if (!res?.ok) return setLastError(res?.error || "Play effect failed");
-                            // clear selection on success
                             setSelectedIds(new Set());
                           });
                         }}
@@ -1192,7 +1271,7 @@ export default function App() {
                       >
                         Play Effect
                       </button>
-                    </>
+                    </div>
                   )}
                 </div>
 
@@ -1273,8 +1352,16 @@ export default function App() {
             }}
             targetName={room?.players.find(p => p.id === fateDiscardTarget)?.name ?? "player"}
           />
-
-
+          <FatePeekModal
+            open={fatePeekOpen}
+            targetName={fatePeekTargetName}
+            cards={fatePeekCards}
+            onMoveUp={moveUp}
+            onMoveDown={moveDown}
+            onReset={resetPeek}
+            onCancel={cancelFatePeek}
+            onConfirm={confirmFatePeek}
+          />
 
 
           {/*chat*/}
@@ -1472,6 +1559,9 @@ function DiscardPeek({
       </span>
 
       <span style={{ marginLeft: "auto" }} />
+      <button onClick={onOpen} disabled={count === 0}>
+        Open Discard
+      </button>
       {typeof onReshuffle === "function" && (
         <button
           onClick={onReshuffle}
@@ -1482,9 +1572,6 @@ function DiscardPeek({
           Shuffle Discard
         </button>
       )}
-      <button onClick={onOpen} disabled={count === 0}>
-        Open Discard
-      </button>
     </div>
   );
 }
@@ -1632,6 +1719,7 @@ function FateBar({
   onStartFate,        // choose a target (self allowed)
   onReshuffleFate,    // reshuffle fate discard → fate deck (for a given player)
   onOpenFateDiscard,  // open fate discard viewer (for a given player)
+  onStartPeek,
 }: {
   focusPlayer: Player | null;
   myId: string | null;
@@ -1641,6 +1729,7 @@ function FateBar({
   onStartFate: (targetId: string) => void;
   onReshuffleFate: (playerId: string) => void;
   onOpenFateDiscard: (playerId: string) => void;
+  onStartPeek: (targetId: string, count: number) => void;
 }) {
   if (!focusPlayer) return null;
 
@@ -1653,6 +1742,9 @@ function FateBar({
 
   const canAct = phase === "playing" && isMyTurn && viewingSelf;
   const disabledReason = !isMyTurn ? "Not your turn" : (!viewingSelf ? "Switch to your board to act" : undefined);
+  const [pickMode, setPickMode] = useState<null | "fate" | "peek">(null);
+  const [peekCount, setPeekCount] = useState(2);
+
 
   return (
     <div
@@ -1668,63 +1760,69 @@ function FateBar({
         marginBottom: 12,
       }}
     >
-      <strong>Fate</strong>
 
-      {/* Counts for the FOCUSED player */}
-      <span style={{ opacity: 0.85 }}>Deck: {fateDeck}</span>
-      <span style={{ opacity: 0.85 }}>· Discard: {fateDisc}</span>
-      {!viewingSelf && (
-        <span style={{ opacity: 0.6 }}>
-          · Target: {focusPlayer.name}
-        </span>
-      )}
+      {/* LEFT: info */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <strong>Fate</strong>
+        <span style={{ opacity: 0.85 }}>Deck: {fateDeck}</span>
+        <span style={{ opacity: 0.85 }}>· Discard: {fateDisc}</span>
+        {!viewingSelf && (
+          <span style={{ opacity: 0.6 }}>· Target: {focusPlayer!.name}</span>
+        )}
+      </div>
+
+      <span style={{marginLeft: "auto"}}/>
 
       {/* Start Fate (self or others) */}
-      <div style={{ position: "relative" }}>
+      <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
         <button
-          onClick={() => setPickOpen(v => !v)}
+          onClick={() => setPickMode("fate")}
           disabled={!canAct}
-          title={canAct ? "Choose a player to Fate (self allowed)" : (disabledReason || "Disabled")}
+          title={canAct ? "Choose a player to Fate" : "Your turn required"}
         >
           Fate…
         </button>
-        {pickOpen && (
-          <div
-            style={{
-              position: "absolute",
-              top: "calc(100% + 6px)",
-              left: 0,
-              zIndex: 20,
-              minWidth: 180,
-              border: "1px solid #334155",
-              borderRadius: 8,
-              background: "#111827",
-              boxShadow: "0 12px 24px rgba(0,0,0,.35)",
-              padding: 6,
-            }}
-          >
-            {players.map(p => (
-              <button
-                key={p.id}
-                onClick={() => { setPickOpen(false); onStartFate(p.id); }}
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "6px 8px",
-                  borderRadius: 6,
-                  border: "1px solid transparent",
-                  background: "transparent",
-                  color: "#e5e7eb",
-                  cursor: "pointer",
-                }}
-                title={p.id === myId ? "You can Fate yourself" : "Fate this player"}
-              >
-                {p.name}{p.id === myId ? " (you)" : ""}
-              </button>
-            ))}
-          </div>
-        )}
+        <button
+          onClick={() => setPickMode("peek")}
+          disabled={!canAct}
+          title={canAct ? "Peek target’s fate deck" : "Your turn required"}
+        >
+          Peek…
+        </button>
       </div>
+      <PlayerPickerModal
+        open={!!pickMode}
+        title={pickMode === "fate" ? "Choose a player to Fate" : "Peek fate deck"}
+        players={players}
+        myId={myId}
+        onClose={() => setPickMode(null)}
+        extra={pickMode === "peek" ? (
+          <div style={{ marginTop: 10 }}>
+            <label style={{ fontSize: 14 }}>
+              Cards to peek:{" "}
+              <input
+                type="number"
+                min={1}
+                max={4}
+                value={peekCount}
+                onChange={(e) => setPeekCount(Math.max(1, Math.min(4, Number(e.target.value) || 1)))}
+                style={{ width: 56, padding: "4px 6px", marginLeft: 6 }}
+              />
+            </label>
+          </div>
+        ) : null}
+        onPick={(targetId) => {
+          if (pickMode === "fate") {
+            onStartFate(targetId);
+          } else {
+            onStartPeek(targetId, peekCount);
+          }
+          setPickMode(null);
+        }}
+      />
+
+
+
 
       {/* View fate discard (of the focused player) */}
       <button
@@ -2239,6 +2337,146 @@ function CardFace({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+function FatePeekModal({
+  open,
+  targetName,
+  cards,
+  onMoveUp,
+  onMoveDown,
+  onReset,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  targetName: string;
+  cards: Card[];
+  onMoveUp: (i: number) => void;
+  onMoveDown: (i: number) => void;
+  onReset: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div role="dialog" aria-modal="true"
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", display: "grid", placeItems: "center", zIndex: 100 }}
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(860px, 95vw)",
+          maxHeight: "80vh",
+          overflowY: "auto",
+          background: "#111827",
+          color: "#e5e7eb",
+          border: "1px solid #334155",
+          borderRadius: 12,
+          padding: 12,
+          boxShadow: "0 12px 30px rgba(0,0,0,.45)"
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <strong>Peek top {cards.length} — {targetName}</strong>
+          <span style={{ opacity: 0.75, fontSize: 12 }}>Top is leftmost</span>
+          <span style={{ marginLeft: "auto" }} />
+          <button onClick={onReset} title="Reset order">Reset</button>
+          <button onClick={onCancel}>Cancel</button>
+          <button onClick={onConfirm} disabled={cards.length === 0} style={{ marginLeft: 6 }}>
+            Confirm Order
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {cards.length === 0 ? (
+            <div style={{ opacity: 0.7 }}>No cards available</div>
+          ) : (
+            cards.map((c, idx) => (
+              <div key={c.id} style={{ position: "relative" }}>
+                <CardFace
+                  card={c}
+                  showCost={false}
+                  canLock={false}
+                  canAdjustStrength={false}
+                  size="md"
+                />
+                {/* order badge */}
+                <div style={{
+                  position: "absolute", top: 6, left: 8, fontSize: 12,
+                  background: "#1f2937", border: "1px solid #334155", borderRadius: 6, padding: "2px 6px"
+                }}>
+                  #{idx + 1}
+                </div>
+                {/* controls */}
+                <div style={{ display: "flex", gap: 6, marginTop: 6, justifyContent: "center" }}>
+                  <button onClick={() => onMoveUp(idx)} title="Move toward top (left)">↑</button>
+                  <button onClick={() => onMoveDown(idx)} title="Move toward bottom (right)">↓</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+function PlayerPickerModal({
+  open, title, players, myId, onPick, onClose, extra,
+}: {
+  open: boolean;
+  title: string;
+  players: Player[];
+  myId: string | null;
+  onPick: (id: string) => void;
+  onClose: () => void;
+  extra?: React.ReactNode;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,.55)",
+        display: "grid", placeItems: "center", zIndex: 120,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(420px, 92vw)",
+          background: "#111827", color: "#e5e7eb",
+          border: "1px solid #334155", borderRadius: 12, padding: 12,
+          boxShadow: "0 12px 30px rgba(0,0,0,.45)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <strong>{title}</strong>
+          <span style={{ marginLeft: "auto" }} />
+          <button onClick={onClose}>Close</button>
+        </div>
+
+        {extra}
+
+        <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+          {players.map(p => (
+            <button
+              key={p.id}
+              onClick={() => onPick(p.id)}
+              style={{
+                textAlign: "left", padding: "8px 10px", borderRadius: 8,
+                border: "1px solid #334155", background: "#0b1220", color: "#e5e7eb",
+              }}
+            >
+              {p.name}{p.id === myId ? " (you)" : ""}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
