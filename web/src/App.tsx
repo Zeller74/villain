@@ -7,7 +7,8 @@ type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlaye
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string};
-type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; desc?: string; cost: number; baseStrength?: number | null; strength?: number};
+type Card = {id: string; label: string; type: CardType; faceUp: boolean; locked?: boolean; desc?: string; cost: number; baseStrength?: number | null; strength?: number};
+type CardType = "Ally" | "Item" | "Condition" | "Effect" | "Hero" | "Cheat" | "Guardian" | "Curse" | "Ingredient" | "Maui" | "Omnidroid" | "Prince" | "Prisoner" | "Relic" | "Remote" | "Titan"
 type Location = {id: string; name: string; locked?: boolean; top: Card[]; bottom: Card[]; actions?: ActionKind[]; topSlots?: number;};
 type Board = {moverAt: 0 | 1 | 2 | 3, locations: Location[]};
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "pawn" | "strength" | "fate_reshuffle"; text: string;}
@@ -26,7 +27,6 @@ type CharacterPreview = {
   name: string;
   locations: { name: string; actions: ActionKind[]; topSlots?: number }[];
 };
-
 const ACTION_LABELS: Record<ActionKind, string> = {
   gain1: "Gain 1",
   gain2: "Gain 2",
@@ -40,7 +40,18 @@ const ACTION_LABELS: Record<ActionKind, string> = {
   vanquish: "Vanquish",
   activate: "Activate",
 };
-
+type CardFaceProps = {
+  card: Card & { printedCost?: number | null };
+  locked?: boolean;
+  onClick?: () => void;
+  canLock?: boolean;
+  onToggleLock?: (nextLocked: boolean) => void;
+  canAdjustStrength?: boolean;
+  onAdjustStrength?: (delta: number) => void;
+  size?: "sm" | "md";
+  title?: string;
+  showCost?: boolean;
+};
 
 
 
@@ -963,7 +974,7 @@ export default function App() {
                             padding: 6,
                             cursor: (fatePlacing || moving?.row === "top") ? "pointer" : "default",
                             background: "#111827",
-                            minHeight: 130,
+                            minHeight: 220,
                           }}
                         >
                           {loc.top.length === 0 ? (
@@ -975,102 +986,31 @@ export default function App() {
 
                               return (
                                 <div key={c.id} style={{ position: "relative", display: "inline-block" }}>
-                                  <div
-                                    onClick={(e) => {
-                                      e.stopPropagation();
+                                  <CardFace
+                                    key={c.id}
+                                    card={c}
+                                    showCost={false} 
+                                    locked={!!c.locked}
+                                    onClick={() => {
                                       if (!isMyTurn || focusPlayerId !== myId) return;
-                                      if (moving?.row === "top") {
-                                        if (loc.locked) { setLastError("Location is locked"); return; }
-                                        dropMoveTop(i);
-                                        return;
-                                      }
+                                      if (moving?.row === "top") { if (!loc.locked) dropMoveTop(i); return; }
                                       if (c.locked) { setLastError("Card is locked"); return; }
                                       startMoveTop(c.id, i, c.label);
                                     }}
-                                    title={c.label}
-                                    style={{
-                                      minWidth: 80, height: 120,
-                                      border: "1px solid #64748b",
-                                      borderRadius: 6,
-                                      background: "#111827",
-                                      color: "#e5e7eb",
-                                      display: "flex", alignItems: "center", justifyContent: "center",
-                                      fontSize: 11, padding: 4, textAlign: "center",
-                                      cursor: (isMyTurn && focusPlayerId === myId) || (moving?.row === "top")
-                                        ? "pointer"
-                                        : "default",
-                                      opacity: c.locked ? 0.6 : 1,
+                                    canLock={canEditTop}
+                                    onToggleLock={(next) => {
+                                      sockRef.current!.emit(
+                                        "board:toggleCardLock",
+                                        { cardId: c.id, locked: next },
+                                        (res:{ok:boolean; error?:string}) => {
+                                          if (!res?.ok) setLastError(res?.error || "Toggle card lock failed");
+                                        }
+                                      );
                                     }}
-                                  >
-                                    {/* Lock toggle (owner only) */}
-                                    {canEditTop && (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          sockRef.current!.emit(
-                                            "board:toggleCardLock",
-                                            { cardId: c.id, locked: !c.locked },
-                                            (res: { ok: boolean; error?: string }) => {
-                                              if (!res?.ok) setLastError(res?.error || "Toggle card lock failed");
-                                            }
-                                          );
-                                        }}
-                                        title={c.locked ? "Unlock card" : "Lock card"}
-                                        style={{
-                                          position: "absolute", top: 2, left: 2, zIndex: 5,
-                                          fontSize: 10, padding: "1px 4px",
-                                          borderRadius: 6, border: "1px solid #334155",
-                                          background: c.locked ? "#7f1d1d" : "#1e293b",
-                                          color: "#e5e7eb",
-                                          cursor: "pointer",
-                                        }}
-                                      >
-                                        {c.locked ? "🔒" : "🔓"}
-                                      </button>
-                                    )}
-
-                                    {/* Strength badge */}
-                                    {typeof c.strength === "number" && c.strength !== 0 && (
-                                      <div
-                                        style={{
-                                          position: "absolute",
-                                          bottom: 2,
-                                          left: 2,
-                                          zIndex: 4,
-                                          fontSize: 11,
-                                          lineHeight: 1,
-                                          padding: "0 6px",
-                                          borderRadius: 6,
-                                          border: "1px solid #334155",
-                                          background: "#1e293b",
-                                          color: (c.strength ?? 0) < 0 ? "#fca5a5" : "#a7f3d0",
-                                          whiteSpace: "nowrap",
-                                          fontVariantNumeric: "tabular-nums",
-                                        }}
-                                        title={`Strength ${c.strength > 0 ? `+${c.strength}` : `${c.strength}`}`}
-                                      >
-                                        {c.strength > 0 ? `+${c.strength}` : `${c.strength}`}
-                                      </div>
-                                    )}
-
-                                    {/* Strength controls (owner only, and not locked) */}
-                                    {canEditTop && !c.locked && (
-                                      <div style={{ position: "absolute", bottom: 2, right: 2, display: "flex", gap: 4, zIndex: 5 }}>
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); changeCardStrength(c.id, -1); }}
-                                          title="−1 strength"
-                                          style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb" }}
-                                        >−</button>
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); changeCardStrength(c.id, +1); }}
-                                          title="+1 strength"
-                                          style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb" }}
-                                        >+</button>
-                                      </div>
-                                    )}
-
-                                    {c.label}
-                                  </div>
+                                    canAdjustStrength={canEditTop && !c.locked}
+                                    onAdjustStrength={(delta) => changeCardStrength(c.id, delta)}
+                                    size="md"
+                                  />
                                 </div>
                               );
                             })
@@ -1106,7 +1046,7 @@ export default function App() {
                           padding: 6,
                           background: "#111827",
                           cursor: canDropHere && (moving || selectedIds.size > 0) ? "pointer" : "default",
-                          minHeight: 130,
+                          minHeight: 220,
                         }}
                         title={
                           !viewingSelf ? "You can only play on your own board"
@@ -1122,112 +1062,27 @@ export default function App() {
                           ) : (
                             loc.bottom.map(c => (
                               <div key={c.id} style={{ position: "relative", display: "inline-block" }}>
-                                {/* card face */}
-                                <div
-                                  onClick={(e) => {
-                                    //don't trigger play
-                                    e.stopPropagation();               
+                                <CardFace
+                                  key={c.id}
+                                  card={c}
+                                  locked={!!c.locked}
+                                  onClick={() => {
                                     if (!isMyTurn || focusPlayerId !== myId) return;
                                     if (c.locked) { setLastError("Card is locked"); return; }
                                     startMove(c.id, i, c.label);
                                   }}
-                                  title={c.label}
-                                  style={{
-                                    minWidth: 80, height: 120,
-                                    border: "1px solid #64748b",
-                                    borderRadius: 6,
-                                    background: "#0b1220",
-                                    color: "#e5e7eb",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    fontSize: 11, padding: 4, textAlign: "center",
-                                    cursor: (isMyTurn && focusPlayerId === myId) ? "pointer" : "default",
-                                    opacity: c.locked ? 0.6 : 1,
+                                  // show lock/± only if it's your turn AND you're viewing your own board
+                                  canLock={viewingSelf && isMyTurn}
+                                  onToggleLock={(next) => {
+                                    sockRef.current!.emit("board:toggleCardLock",
+                                      { cardId: c.id, locked: next },
+                                      (res:{ok:boolean; error?:string}) => { if (!res?.ok) setLastError(res?.error || "Toggle failed"); }
+                                    );
                                   }}
-                                >
-                                  {viewingSelf && isMyTurn && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        sockRef.current!.emit("board:toggleCardLock", { cardId: c.id, locked: !c.locked }, (res: { ok: boolean; error?: string }) => {
-                                          if (!res?.ok) setLastError(res?.error || "Toggle card lock failed");
-                                        });
-                                      }}
-                                      title={c.locked ? "Unlock card" : "Lock card"}
-                                      style={{
-                                        position: "absolute", top: 2, left: 2, zIndex: 5,
-                                        fontSize: 10, padding: "1px 4px",
-                                        borderRadius: 6, border: "1px solid #334155",
-                                        background: c.locked ? "#7f1d1d" : "#1e293b",
-                                        color: "#e5e7eb",
-                                        cursor: "pointer",
-                                      }}
-                                    >
-                                      {c.locked ? "🔒" : "🔓"}
-                                    </button>
-                                  )}
-                                  {typeof c.baseStrength === "number" && (
-                                    <div
-                                      style={{
-                                        position: "absolute", top: 2, left: 2, zIndex: 5,
-                                        fontSize: 11, padding: "0 6px", borderRadius: 6,
-                                        border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb",
-                                      }}
-                                      title="Printed strength"
-                                    >
-                                      {c.baseStrength}
-                                    </div>
-                                  )}
-
-                                  {/* cost — top-right (cost can be 0; still display) */}
-                                  <div
-                                    style={{
-                                      position: "absolute", top: 2, right: 2, zIndex: 5,
-                                      fontSize: 11, padding: "0 6px", borderRadius: 6,
-                                      border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb",
-                                    }}
-                                    title="Cost"
-                                  >
-                                    {c.cost}
-                                  </div>
-                                  {typeof c.strength === "number" && c.strength !== 0 && (
-                                    <div
-                                      style={{
-                                        position: "absolute",
-                                        bottom: 2,
-                                        left: 2,
-                                        zIndex: 4,
-                                        fontSize: 11,
-                                        lineHeight: 1,
-                                        padding: "0 6px",
-                                        borderRadius: 6,
-                                        border: "1px solid #334155",
-                                        background: "#1e293b",
-                                        color: (c.strength ?? 0) < 0 ? "#fca5a5" : "#a7f3d0",
-                                        whiteSpace: "nowrap",
-                                        fontVariantNumeric: "tabular-nums",
-                                      }}
-                                      title={`Strength ${c.strength > 0 ? `+${c.strength}` : `${c.strength}`}`}
-                                    >
-                                      {c.strength > 0 ? `+${c.strength}` : `${c.strength}`}
-                                    </div>
-                                  )}
-                                  {focusPlayerId === myId && room?.game.phase === "playing" && !c.locked && (
-                                    <div style={{ position: "absolute", bottom: 2, right: 2, display: "flex", gap: 4, zIndex: 5 }}>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); changeCardStrength(c.id, -1); }}
-                                        title="−1 strength"
-                                        style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb" }}
-                                      >−</button>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); changeCardStrength(c.id, +1); }}
-                                        title="+1 strength"
-                                        style={{ fontSize: 11, padding: "1px 6px", borderRadius: 6, border: "1px solid #334155", background: "#1e293b", color: "#e5e7eb" }}
-                                      >+</button>
-                                    </div>
-                                  )}
-
-                                  {c.label}
-                                </div>
+                                  canAdjustStrength={viewingSelf && isMyTurn && !c.locked}
+                                  onAdjustStrength={(delta) => changeCardStrength(c.id, delta)}
+                                  size="md"
+                                />
                               </div>
                             ))
                           )}
@@ -1319,24 +1174,17 @@ export default function App() {
                       myHand.map((c) => {
                         const selected = selectedIds.has(c.id);
                         return (
-                          <div
-                            key={c.id}
+                          <div key={c.id}
+                            style={{ border: selected ? "2px solid #3b82f6" : "1px solid #475569", borderRadius: 8 }}>
+                          <CardFace
+                            card={c}
+                            locked={!!c.locked}
                             onClick={() => toggleSelect(c.id)}
-                            title={c.label}
-                            style={{
-                              minWidth: 90, height: 130,
-                              padding: 8,
-                              border: selected ? "2px solid #3b82f6" : "1px solid #475569",
-                              borderRadius: 8,
-                              background: "#0b1220",
-                              color: "#e5e7eb",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              textAlign: "center", fontSize: 12,
-                              cursor: "pointer",
-                            }}
-                          >
-                            {c.label}
-                          </div>
+                            canLock={false}
+                            canAdjustStrength={false}
+                            size="sm"
+                          />
+                        </div>
                         );
                       })
                     )
@@ -1657,49 +1505,18 @@ function DiscardModal({
             <div style={{ opacity: 0.7 }}>Empty</div>
           ) : (
             cards.map((c, idx) => (
-              <div
-                key={c.id}
+              <div key={c.id}
+                onClick={() => { if (canTake && onTakeCard) onTakeCard(c);}}
+                style={{ cursor: "pointer" }}>
+              <CardFace
+                card={c}
+                locked={!!c.locked}
+                canLock={false}               // HIDE lock icon
+                canAdjustStrength={false}     // HIDE ± buttons
+                size="sm"
                 onClick={() => { if (canTake && onTakeCard) onTakeCard(c); }}
-                title={
-                  canTake ? "Click to add this card to your hand"
-                          : c.label
-                }
-                style={{
-                  position: "relative",
-                  minWidth: 90,
-                  height: 130,
-                  padding: 8,
-                  border: "1px solid #475569",
-                  borderRadius: 8,
-                  background: "#1f2937",
-                  color: "#f1f5f9",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 12,
-                  textAlign: "center",
-                  cursor: canTake ? "pointer" : "default",
-                  opacity: canTake ? 1 : 0.9,
-                }}
-              >
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 6,
-                    left: 8,
-                    fontSize: 11,
-                    opacity: 0.6,
-                  }}
-                >
-                  #{cards.length - idx}
-                </div>
-                {c.label}
-                {!canTake && (
-                  <div style={{ position: "absolute", bottom: 6, fontSize: 11, opacity: 0.6 }}>
-                    view only
-                  </div>
-                )}
-              </div>
+              />
+            </div>
             ))
           )}
         </div>
@@ -1933,22 +1750,15 @@ function FatePanel({
           <div style={{ opacity: 0.7 }}>No cards available</div>
         ) : (
           cards.map((c) => (
-            <div
-              key={c.id}
-              title={c.label}
-              style={{
-                position: "relative",
-                minWidth: 120, height: 160, padding: 8,
-                border: "1px solid #475569", borderRadius: 8,
-                background: "#1f2937", color: "#f1f5f9",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 12, textAlign: "center",
-              }}
-            >
-              {c.label}
-              <div style={{ position: "absolute", bottom: 6, right: 6, display: "flex", gap: 6 }}>
-                <button onClick={() => onPlay(c)} title="Play this fate card">Play</button>
-              </div>
+            <div key={c.id} onClick={() => onPlay(c)} style={{ cursor: "pointer" }}>
+              <CardFace
+                card={c}
+                showCost={false}
+                canLock={false}
+                canAdjustStrength={false}
+                size="md"
+                onClick={() => onPlay(c)}
+              />
             </div>
           ))
         )}
@@ -2037,42 +1847,15 @@ function FateDiscardModal({
             <div style={{ opacity: 0.7 }}>Empty</div>
           ) : (
             cards.map((c, idx) => (
-              <div
-                key={c.id}
-                title={c.label}
-                style={{
-                  position: "relative",
-                  minWidth: 100,
-                  height: 140,
-                  padding: 8,
-                  border: "1px solid #475569",
-                  borderRadius: 8,
-                  background: "#1f2937",
-                  color: "#f1f5f9",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 12,
-                  textAlign: "center",
-                }}
-              >
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 6,
-                    left: 8,
-                    fontSize: 11,
-                    opacity: 0.6,
-                  }}
-                >
-                  #{cards.length - idx}
-                </div>
-                {c.label}
-                <div style={{ position: "absolute", bottom: 6, right: 6, display: "flex", gap: 6 }}>
-                  <button onClick={() => onTake(c)} title="Take this card to start fate">
-                    Take
-                  </button>
-                </div>
+              <div key={c.id} title={c.label} onClick={() => onTake(c)} style={{ cursor: "pointer" }}>
+                <CardFace
+                  card={c}
+                  showCost={false}
+                  canLock={false}
+                  canAdjustStrength={false}
+                  size="sm"
+                  onClick={() => onTake(c)}
+                />
               </div>
             ))
           )}
@@ -2144,6 +1927,273 @@ function LocationActions({
       )}
       {locked && (
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#fca5a5" }}>🔒 Locked</span>
+      )}
+    </div>
+  );
+}
+function CardFace({
+  card,
+  locked = false,
+  onClick,
+  canLock = false,
+  onToggleLock,
+  canAdjustStrength = false,
+  onAdjustStrength,
+  size = "md",
+  title,
+  showCost = true,
+}: CardFaceProps) {
+  const printedCost =
+    card.printedCost !== undefined ? card.printedCost : card.cost; // fallback to cost if you haven’t added printedCost
+  const hasPrintedCost = printedCost !== null && printedCost !== undefined;
+  const hasBase = typeof card.baseStrength === "number"; // shows even if 0
+
+
+  // sizing
+  const dims =
+    size === "sm"
+      ? { w: 90, h: 130, font: 10, pad: 6 }
+      : { w: 150, h: 200, font: 12, pad: 8 };
+  const badgeBase: React.CSSProperties = {
+    border: "1px solid #334155",
+    background: "#1e293b",
+    color: "#e5e7eb",
+    borderRadius: 6,
+    lineHeight: 1,
+  };
+  const strengthColor =
+    (card.strength ?? 0) < 0 ? "#fca5a5" : "#a7f3d0";
+
+  return (
+    <div
+      onClick={onClick}
+      title={title ?? card.label}
+      style={{
+        position: "relative",
+        width: dims.w,
+        height: dims.h,
+        padding: dims.pad,
+        flexShrink: 0,
+        border: "1px solid #475569",
+        borderRadius: 8,
+        background: "#0b1220",
+        color: "#e5e7eb",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "stretch",
+        justifyContent: "flex-start",
+        gap: 6,
+        textAlign: "center",
+        cursor: onClick ? "pointer" : "default",
+        opacity: locked ? 0.6 : 1,
+        boxShadow: "inset 0 0 0 1px rgba(0,0,0,.25)",
+      }}
+    >
+      {/* Top-center: card type */}
+      {card.type && (
+        <div
+          style={{
+            position: "absolute",
+            top: 2,
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "0 6px",
+            borderRadius: 6,
+            border: "1px solid #334155",
+            background: "#111827",
+            color: "#e5e7eb",
+            fontSize: 10,
+            lineHeight: 1,
+            letterSpacing: 0.5,
+            pointerEvents: "none",
+            whiteSpace: "nowrap",
+          }}
+          title={`Type: ${card.type}`}
+        >
+          {card.type}
+        </div>
+      )}
+
+      {/* Cost (top-left) */}
+      {showCost && hasPrintedCost && (
+        <div
+          style={{
+            ...badgeBase,
+            position: "absolute",
+            top: 2,
+            left: 2,
+            padding: "0 6px",
+            fontSize: 11,
+          }}
+          title="Cost"
+        >
+          {printedCost}
+        </div>
+      )}
+
+      {/* Lock (top-right) */}
+      {canLock && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleLock?.(!locked);
+          }}
+          title={locked ? "Unlock card" : "Lock card"}
+          style={{
+            position: "absolute",
+            top: 2,
+            right: 2,
+            fontSize: 10,
+            padding: "1px 4px",
+            borderRadius: 6,
+            border: "1px solid #334155",
+            background: locked ? "#7f1d1d" : "#1e293b",
+            color: "#e5e7eb",
+            cursor: "pointer",
+          }}
+        >
+          {locked ? "🔒" : "🔓"}
+        </button>
+      )}
+
+      {/* Content area: allow wrapping, no ellipsis */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          textAlign: "center",
+          gap: 4,
+          flex: 1,
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: dims.font + 1,
+            lineHeight: 1.1,
+            whiteSpace: "normal",
+            overflow: "visible",
+            overflowWrap: "anywhere",
+          }}
+        >
+          {card.label}
+        </div>
+
+        {card.desc && (
+          <div
+            style={{
+              fontSize: dims.font - 1,
+              lineHeight: 1.25,
+              opacity: 0.9,
+              whiteSpace: "normal",
+              overflow: "visible",
+              overflowWrap: "anywhere",
+              maxWidth: "100%",
+            }}
+          >
+            {card.desc}
+          </div>
+        )}
+      </div>
+
+      {/* Bottom-left: strength badge (only if non-zero) */}
+      {hasBase && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 4,
+            left: 4,
+            padding: "0 6px",
+            borderRadius: 6,
+            border: "1px solid #334155",
+            background: "#1e293b",
+            color: "#e5e7eb",
+            fontSize: 11,
+            lineHeight: 1,
+            whiteSpace: "nowrap",
+            fontVariantNumeric: "tabular-nums",
+          }}
+          title="Printed strength"
+        >
+          {card.baseStrength}
+        </div>
+      )}
+
+      {/* Bottom-right: compact ± with matching numeric chip */}
+      {canAdjustStrength && hasBase && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 4,
+            right: 4,
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdjustStrength?.(-1);
+            }}
+            title="−1 strength"
+            style={{
+              fontSize: 10,
+              height: 20,
+              minWidth: 20,
+              padding: 0,
+              borderRadius: 6,
+              border: "1px solid #334155",
+              background: "#1e293b",
+              color: "#e5e7eb",
+              lineHeight: 1,
+            }}
+          >
+            −
+          </button>
+
+          {/* matching chip to the left badge */}
+          <div
+            style={{
+              ...badgeBase,
+              padding: "0 6px",
+              fontSize: 11,
+              color: strengthColor,
+              fontVariantNumeric: "tabular-nums",
+              whiteSpace: "nowrap",
+            }}
+            title="Current strength"
+          >
+            {typeof card.strength === "number"
+              ? card.strength > 0
+                ? `+${card.strength}`
+                : `${card.strength}`
+              : "0"}
+          </div>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdjustStrength?.(+1);
+            }}
+            title="+1 strength"
+            style={{
+              fontSize: 10,
+              height: 20,
+              minWidth: 20,
+              padding: 0,
+              borderRadius: 6,
+              border: "1px solid #334155",
+              background: "#1e293b",
+              color: "#e5e7eb",
+              lineHeight: 1,
+            }}
+          >
+            +
+          </button>
+        </div>
       )}
     </div>
   );

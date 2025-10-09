@@ -3,7 +3,8 @@ import {nanoid} from "nanoid";
 
 type Location = {id: string; name: string; bottom: Card[]; top: Card[]; locked?: boolean; actions?: ActionKind[]; topSlots?: number};
 type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, Location]}
-type Card = {id: string; label: string; faceUp: boolean; locked?: boolean; desc?: string; cost: number; baseStrength?: number | null; strength?: number;};
+type Card = {id: string; type: CardType; label: string; faceUp: boolean; locked?: boolean; desc?: string; cost: number; baseStrength?: number | null; strength?: number;};
+type CardType = "Ally" | "Item" | "Condition" | "Effect" | "Hero" | "Cheat" | "Guardian" | "Curse" | "Ingredient" | "Maui" | "Omnidroid" | "Prince" | "Prisoner" | "Relic" | "Remote" | "Titan"
 type Zones = {deck: Card[]; hand: Card[]; discard: Card[]; fateDeck: Card[]; fateDiscard: Card[]};
 type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number; won?: boolean;};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
@@ -49,7 +50,7 @@ type ActionKind =
   | "moveHero"
   | "vanquish"
   | "activate";
-type CardTemplate = {label: string; description?: string; cost?: number| null; strength?: number| null; copies?: number};
+type CardTemplate = {label: string; type: CardType; description?: string; cost?: number| null; strength?: number| null; copies?: number};
 type LocationTemplate = {name: string; actions: ActionKind[]; topSlots?: number;}
 type CharacterTemplate = {id: string; name: string; deck: CardTemplate[]; fateDeck: CardTemplate[]; locations: LocationTemplate[]}
 type CharacterPreview = {
@@ -80,18 +81,18 @@ const CHARACTERS_DATA: readonly [
       { name: "King Stefan's Castle", actions: ["gain1", "fate", "vanquish", "play"] },
     ],
     deck: [
-      { label: "Cackling Goon", description: "Cackling Goon gets +1 Strength for each Hero at his location.", cost: 1, strength: 1, copies: 3 },
-      { label: "Dragon Form", description: "Defeat a Hero with a Strength of 3 or less. If a Fate action targets you before your next turn, gain 3 Power.", cost: 3, strength: null, copies: 3 },
-      { label: "Forest of Thorns", description: "Heroes must have a Strength of 4 or more to be played to this location. Discard this Curse when a Hero is played to this location", cost: 2, strength: null, copies: 3 },
-      { label: "Green Fire", description: "Heroes cannot be played to this location. Discard this Curse if Maleficent moves to this location.", cost: 3, strength: null, copies: 3},
-      { label: "Savage Goon", description: "No additional Ability", cost: 3, strength: 4, copies: 3},
-      { label: "Sinister Goon", description: "Sinister Goon gets +1 Strength if there are any Curses at his location.", cost: 2, strength: 3, copies: 3},
-      { label: "Vanish", description: "On your next turn, Maleficent does not have to move to a new location", cost: 0, strength: null, copies: 3},
+      { label: "Cackling Goon", type: "Ally", description: "Cackling Goon gets +1 Strength for each Hero at his location.", cost: 1, strength: 1, copies: 3 },
+      { label: "Dragon Form", type: "Effect", description: "Defeat a Hero with a Strength of 3 or less. If a Fate action targets you before your next turn, gain 3 Power.", cost: 3, strength: null, copies: 3 },
+      { label: "Forest of Thorns", type: "Curse", description: "Heroes must have a Strength of 4 or more to be played to this location. Discard this Curse when a Hero is played to this location", cost: 2, strength: null, copies: 3 },
+      { label: "Green Fire", type: "Curse", description: "Heroes cannot be played to this location. Discard this Curse if Maleficent moves to this location.", cost: 3, strength: null, copies: 3},
+      { label: "Savage Goon", type: "Ally", description: "No additional Ability", cost: 3, strength: 4, copies: 3},
+      { label: "Sinister Goon", type: "Ally", description: "Sinister Goon gets +1 Strength if there are any Curses at his location.", cost: 2, strength: 3, copies: 3},
+      { label: "Vanish", type: "Effect", description: "On your next turn, Maleficent does not have to move to a new location", cost: 0, strength: null, copies: 3},
     ],
     fateDeck: [
-      { label: "Guards", description: "When performing a Vanquish action to defeat Guards, at least two Allies must be used", cost: null, strength: 3, copies: 3},
-      { label: "Sword of Truth", description: "When Sword of Truth is played attach it to a Hero with no other attached Items. That Hero gets +2 Strength. The Cost to play a Curse to this location is increased by 2 Power", cost: null, strength: 2, copies: 3},
-      { label: "Once Upon a Dream", description: "Discard a Curse from a location in Maleficent's Realm that has a Hero.", cost: null, strength: null, copies: 2},
+      { label: "Guards", type: "Hero", description: "When performing a Vanquish action to defeat Guards, at least two Allies must be used", cost: null, strength: 3, copies: 3},
+      { label: "Sword of Truth", type: "Item", description: "When Sword of Truth is played attach it to a Hero with no other attached Items. That Hero gets +2 Strength. The Cost to play a Curse to this location is increased by 2 Power", cost: null, strength: 2, copies: 3},
+      { label: "Once Upon a Dream", type: "Effect", description: "Discard a Curse from a location in Maleficent's Realm that has a Hero.", cost: null, strength: null, copies: 2},
     ],
   },
   {
@@ -104,16 +105,16 @@ const CHARACTERS_DATA: readonly [
       { name: "Hangman's Tree", actions: ["fate", "gain2", "moveHero", "play"] },
     ],
     deck: [
-      { label: "Boarding Party", description: "When performing a Vanquish action, Boarding Party may be used to defeat a Hero at their location or at an adjacent unlocked location.", cost: 2, strength: 2, copies: 3 },
-      { label: "Give Them a Scare", description: "Look at the top two cards of your Fate deck. Either discard both cards or return them to the top in any order.", cost: 1, strength: null, copies: 3},
-      { label: "Swashbuckler", description: "No additional Ability.", cost: 1, strength: 2, copies: 3},
-      { label: "Worthy Opponent", description: "Gain 2 Power. Reveal cards from the top of your Fate deck until you reveal a Hero. Play that Hero and discard the rest.", cost: 0, strength: null, copies: 3},
+      { label: "Boarding Party", type: "Ally", description: "When performing a Vanquish action, Boarding Party may be used to defeat a Hero at their location or at an adjacent unlocked location.", cost: 2, strength: 2, copies: 3 },
+      { label: "Give Them a Scare", type: "Effect", description: "Look at the top two cards of your Fate deck. Either discard both cards or return them to the top in any order.", cost: 1, strength: null, copies: 3},
+      { label: "Swashbuckler", type: "Ally", description: "No additional Ability.", cost: 1, strength: 2, copies: 3},
+      { label: "Worthy Opponent", type: "Effect", description: "Gain 2 Power. Reveal cards from the top of your Fate deck until you reveal a Hero. Play that Hero and discard the rest.", cost: 0, strength: null, copies: 3},
     ],
     fateDeck: [
-      { label: "Pixie Dust", description: "When Pixie Dust is played, attach it to a Hero. That Hero gets +2 Strength", cost: null, strength: 2, copies: 3},
-      { label: "Lost Boys", description: "When performing a Vanquish action to defeat Lost Boys, at least two Allies must be used.", cost: null, strength: 4, copies: 2},
-      { label: "Splitting Headache", description: "Discard an Item from Captain Hook's Realm", cost: null, strength: null, copies: 2},
-      { label: "Taunt", description: "When Taunt is played, attach it to a Hero. Captain Hook must defeat Heroes with Taunt before defeating other Heroes.", cost: null, strength: null, copies: 2},
+      { label: "Pixie Dust", type: "Effect", description: "When Pixie Dust is played, attach it to a Hero. That Hero gets +2 Strength", cost: null, strength: 2, copies: 3},
+      { label: "Lost Boys", type: "Hero", description: "When performing a Vanquish action to defeat Lost Boys, at least two Allies must be used.", cost: null, strength: 4, copies: 2},
+      { label: "Splitting Headache", type: "Effect", description: "Discard an Item from Captain Hook's Realm", cost: null, strength: null, copies: 2},
+      { label: "Taunt", type: "Item", description: "When Taunt is played, attach it to a Hero. Captain Hook must defeat Heroes with Taunt before defeating other Heroes.", cost: null, strength: null, copies: 2},
     ],
   },
 ];
@@ -539,6 +540,7 @@ function expandDeck(templates: CardTemplate[]): Card[] {
       out.push({
         id: nanoid(8),
         label: t.label,
+        type: t.type,
         faceUp: false,
         desc: t.description ?? "",
         cost: t.cost ?? 0,                 // cost always set
