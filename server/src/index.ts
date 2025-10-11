@@ -10,7 +10,7 @@ type Player = {id: string; name: string, ready: boolean; characterId: string | n
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession; fatePeek?: FatePeekSession};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek" | "fate_return";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -36,7 +36,8 @@ type ActionEntry = {
     | { type: "fate_discard_top"; cardId: string; locationIndex: 0|1|2|3 }
     | { type: "fate_discard_both"; targetId: string; cardIds: string[] }
     | { type: "play_effect"; cardId: string }
-    | { type: "fate_peek"; targetId: string; count: number};
+    | { type: "fate_peek"; targetId: string; count: number}
+    | { type: "fate_return"; targetId: string; cardId: string};
 
   undone?: boolean;
 };
@@ -78,10 +79,10 @@ const CHARACTERS_DATA: readonly [
     id: "maleficent",
     name: "Maleficent",
     locations: [
-      { name: "Forbidden Mountains", actions: ["moveItemAlly", "play", "gain1", "fate"] },
-      { name: "Briar Rose's Cottage", actions: ["gain2", "moveItemAlly", "play", "discard"] },
-      { name: "The Forest", actions: ["discard", "play", "gain3", "play"] },
-      { name: "King Stefan's Castle", actions: ["gain1", "fate", "vanquish", "play"] },
+      { name: "Forbidden Mountains", actions: ["moveItemAlly", "play", "gain1", "fate"], topSlots: 2 },
+      { name: "Briar Rose's Cottage", actions: ["gain2", "moveItemAlly", "play", "discard"], topSlots: 2 },
+      { name: "The Forest", actions: ["discard", "play", "gain3", "play"], topSlots: 2 },
+      { name: "King Stefan's Castle", actions: ["gain1", "fate", "vanquish", "play"], topSlots: 2 },
     ],
     deck: [
       { label: "Cackling Goon", type: "Ally", description: "Cackling Goon gets +1 Strength for each Hero at his location.", cost: 1, strength: 1, copies: 3 },
@@ -115,10 +116,10 @@ const CHARACTERS_DATA: readonly [
     id: "captain",
     name: "Captain Hook",
     locations: [
-      { name: "Jolly Roger", actions: ["gain1", "discard", "vanquish", "play"] },
-      { name: "Skull Rock", actions: ["gain1", "play", "fate", "discard"] },
-      { name: "Mermaid Lagoon", actions: ["play", "moveItemAlly", "gain3", "play"] },
-      { name: "Hangman's Tree", actions: ["fate", "gain2", "moveHero", "play"] },
+      { name: "Jolly Roger", actions: ["gain1", "discard", "vanquish", "play"], topSlots: 2 },
+      { name: "Skull Rock", actions: ["gain1", "play", "fate", "discard"], topSlots: 2 },
+      { name: "Mermaid Lagoon", actions: ["play", "moveItemAlly", "gain3", "play"], topSlots: 2 },
+      { name: "Hangman's Tree", actions: ["fate", "gain2", "moveHero", "play"], topSlots: 2 },
     ],
     deck: [
       { label: "Boarding Party", type: "Ally", description: "When performing a Vanquish action, Boarding Party may be used to defeat a Hero at their location or at an adjacent unlocked location.", cost: 2, strength: 2, copies: 3 },
@@ -154,10 +155,10 @@ const CHARACTERS_DATA: readonly [
     id: "prince",
     name: "Prince John",
     locations: [
-      { name: "Sherwodd Forest", actions: ["gain1", "discard", "play", "fate"] },
-      { name: "Friar Tuck's Church", actions: ["gain2", "play", "play", "moveItemAlly"] },
-      { name: "Nottingham", actions: ["fate", "gain1", "vanquish", "play"] },
-      { name: "The Jail", actions: ["gain3", "play", "discard"] },
+      { name: "Sherwodd Forest", actions: ["gain1", "discard", "play", "fate"], topSlots: 2 },
+      { name: "Friar Tuck's Church", actions: ["gain2", "play", "play", "moveItemAlly"], topSlots: 2 },
+      { name: "Nottingham", actions: ["fate", "gain1", "vanquish", "play"], topSlots: 2 },
+      { name: "The Jail", actions: ["gain3", "play", "discard"], topSlots: 0 },
     ],
     deck: [
       { label: "Beautiful, Lovely Taxes", type: "Effect", description: "Gain 1 Power for each Hero in your Realm", cost: 0, strength: null, copies: 3},
@@ -516,7 +517,6 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
   }
   if (e.type === "fate_discard_both" && e.data.type === "fate_discard_both") {
     const d = e.data as Extract<ActionEntry["data"], { type: "fate_discard_both" }>;
-    // get actor + target names like your other branches
     const actor  = room.players.find(p => p.id === e.actorId);
     const name   = actor?.name ?? e.actorId.slice(0, 6);
     let targetName = "player";
@@ -530,7 +530,6 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
   if (e.type === "play_effect" && e.data.type === "play_effect") {
     const name = room.players.find(p => p.id === e.actorId)?.name ?? e.actorId.slice(0, 6);
     const cardId = e.data.cardId;
-    // Try to find label in player piles (discard is most likely)
     let label = "a card";
     for (const p of room.players) {
       const inDiscard = p.zones.discard.find(c => c.id === cardId);
@@ -556,6 +555,16 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} arranged the top ${d.count} of ${targetName}'s fate deck`,
     };
   }
+  if (e.type === "fate_return" && e.data.type === "fate_return") {
+    const d = e.data as Extract<ActionEntry["data"], { type: "fate_return" }>;
+    let targetName = "player";
+    for (const p of room.players) { if (p.id === d.targetId) { targetName = p.name; break; } }
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "fate_return",
+      text: `${name} returned a fate card to ${targetName}'s deck and reshuffled`,
+    };
+  }
+
 
   //fallback
   return {
@@ -1195,6 +1204,33 @@ io.on("connection", (socket) => {
         const card = me.zones.discard.splice(j, 1)[0]!;
         card.faceUp = false;
         me.zones.hand.push(card);
+      } else if (last.type === "fate_return" && last.data.type === "fate_return") {
+          const d = last.data;
+          const target = room.players.find(p => p.id === d.targetId);
+          if (!target) return ack?.({ ok: false, error: "target not found for undo" });
+
+          // locate the card in fateDeck
+          const j = target.zones.fateDeck.findIndex(c => c.id === d.cardId);
+          if (j === -1) return ack?.({ ok: false, error: "card not in fate deck" });
+
+          const card = target.zones.fateDeck.splice(j, 1)[0];
+          if (!card) return ack?.({ ok: false, error: "deck splice failed" });
+
+          // move back to fate discard
+          target.zones.fateDiscard.push(card);
+
+          last.undone = true;
+
+          pushLog(io, roomId, {
+            id: nanoid(8),
+            ts: Date.now(),
+            actorId: socket.id,
+            type: "undo",
+            data: { type: "undo", actionId: last.id }
+          });
+
+          emitRoomState(io, roomId);
+          return ack?.({ ok: true });
       } else {
         return ack?.({ ok: false, error: "unsupported undo" });
       }
@@ -1980,6 +2016,43 @@ io.on("connection", (socket) => {
       emitRoomState(io, roomId);
       ack?.({ ok: true });
     });
+    socket.on("fateDiscard:return", (payload: { playerId: string; cardId: string }, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+
+      const targetId = (payload?.playerId || "").trim();
+      const cardId = (payload?.cardId || "").trim();
+      if (!targetId || !cardId) return ack?.({ ok: false, error: "bad request" });
+
+      const target = room.players.find(p => p.id === targetId);
+      if (!target) return ack?.({ ok: false, error: "player not found" });
+
+      const idx = target.zones.fateDiscard.findIndex(c => c.id === cardId);
+      if (idx < 0) return ack?.({ ok: false, error: "card not in fate discard" });
+
+      const [card] = target.zones.fateDiscard.splice(idx, 1);
+      if (!card) return ack?.({ ok: false, error: "splice failed" });
+      target.zones.fateDeck.push(card);
+
+      // reshuffle the fate deck
+      shuffle(target.zones.fateDeck);
+
+      // log
+      pushLog(io, roomId, {
+        id: nanoid(8),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "fate_return",
+        data: { type: "fate_return", targetId, cardId },
+      });
+
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
+
 
 
 });

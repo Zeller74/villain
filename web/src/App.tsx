@@ -1424,6 +1424,13 @@ export default function App() {
               startFateFromDiscard(fateDiscardTarget, card.id);
             }}
             targetName={room?.players.find(p => p.id === fateDiscardTarget)?.name ?? "player"}
+            onReturnSelected={(card) => {
+              const s = sockRef.current!;
+              s.emit("fateDiscard:return", { playerId: fateDiscardTarget, cardId: card.id }, (res: { ok: boolean; error?: string }) => {
+                if (!res?.ok) return setLastError(res?.error || "Return to deck failed");
+                setShowFateDiscard(false);
+              });
+            }}
           />
           <FatePeekModal
             open={fatePeekOpen}
@@ -2018,14 +2025,19 @@ function FateDiscardModal({
   onClose,
   onTake,
   targetName,
+  onReturnSelected,
 }: {
   open: boolean;
   cards: Card[];
   onClose: () => void;
   onTake: (card: Card) => void;
   targetName: string;
+  onReturnSelected: (card: Card) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => { if (open) setSelectedId(null); }, [open]);
   if (!open) return null;
+  const selected = selectedId ? cards.find(c => c.id === selectedId) || null : null;
   return (
     <div
       role="dialog"
@@ -2057,6 +2069,20 @@ function FateDiscardModal({
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <strong>Fate discard — {targetName} ({cards.length})</strong>
           <span style={{ marginLeft: "auto" }} />
+          <button
+              onClick={() => selected && onTake(selected)}
+              disabled={!selected}
+              title={selected ? "Play selected fate card" : "Select a card first"}
+            >
+              Play
+            </button>
+            <button
+              onClick={() => selected && onReturnSelected(selected)}
+              disabled={!selected}
+              title={selected ? "Return selected card to fate deck (reshuffle)" : "Select a card first"}
+            >
+              Return to Deck
+            </button>
           <button onClick={onClose}>Close</button>
         </div>
 
@@ -2070,20 +2096,35 @@ function FateDiscardModal({
         >
           {cards.length === 0 ? (
             <div style={{ opacity: 0.7 }}>Empty</div>
-          ) : (
-            cards.map((c, idx) => (
-              <div key={c.id} title={c.label} onClick={() => onTake(c)} style={{ cursor: "pointer" }}>
+          ) : cards.map((c, idx) => {
+            const isSel = c.id === selectedId;
+            return (
+              <div
+                key={c.id}
+                onClick={() => setSelectedId(c.id)}
+                title="Select this card"
+                style={{
+                  cursor: "pointer",
+                  border: isSel ? "2px solid #3b82f6" : "1px solid #475569",
+                  borderRadius: 8, background: "#1f2937", color: "#f1f5f9",
+                  minWidth: 100, height: 140, padding: 8,
+                  position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <div style={{ position: "absolute", top: 6, left: 8, fontSize: 11, opacity: 0.6 }}>
+                  #{cards.length - idx}
+                </div>
+                {/* Fate cards: no cost, no lock/± */}
                 <CardFace
                   card={c}
                   showCost={false}
                   canLock={false}
                   canAdjustStrength={false}
                   size="sm"
-                  onClick={() => onTake(c)}
                 />
               </div>
-            ))
-          )}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -2646,8 +2687,8 @@ function HelpButton({ onClick }: { onClick: () => void }) {
       title="Open strategy guide"
       aria-label="Open strategy guide"
       style={{
-        width: 40,
-        height: 40,
+        width: 22,
+        height: 22,
         borderRadius: "50%",
         border: "1px solid #a1a1a1ff",
         color: "#e5e7eb",
@@ -2657,6 +2698,7 @@ function HelpButton({ onClick }: { onClick: () => void }) {
         lineHeight: 1,
         fontSize: 14,
         cursor: "pointer",
+        padding: 0,
       }}
     >
       ?
