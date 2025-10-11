@@ -52,6 +52,60 @@ type CardFaceProps = {
   title?: string;
   showCost?: boolean;
 };
+type GuideEntry = { title: string; image: string; body: string};
+
+const GUIDES: Record<string, GuideEntry> = {
+  maleficent: {
+    title: "Maleficent - Villain Guide",
+    image: "/guides/maleficent.jpg",
+    body: `Maleficent's Objective: Start your turn with a Curse at each location.
+Curses: Curse is a card type unique to Maleficent. Curses are played to locations, and each one has an Ability that affects Heroes at that location. However, each Curse also has an action that will cause it to be discarded. So you'll need to strategize when and where to play each curse.
+Multiple curses may be played to the same location, and a Curse may be moved using a Move an Item or Ally action. The three Curses are Forest of Thorns, Green Fire, and Dreamless Sleep.
+
+Forest of Thorns: Forest of Thorns makes it difficult for opponents to play a Hero at its location because a Hero must have a Strength of 4 or more to be played there.
+
+Green Fire: Green Fire is a very powerful Curse because Heroes cannot be played to its location.
+
+Dreamless Sleep: Dreamless Sleep reduces the Strengths of all Heroes at its location by 2.
+Note: You may move an Ally to a location without having to discard the Curse. Also, you can play Dreamless Sleep to a location that already has Allies without affecting the Allies or the Curse.
+
+Other Cards: Vanish allows Maleficent to remain at a location, enabling her to take the same action two turns in a row. Raven is a powerful Ally to play as early as possible. At the start of each turn, you may move Raven and perform one action that is available at his new location.`,
+  },
+  captain: {
+    title: "Captain Hook - Villain Guide",
+    image: "/guides/captain.jpg",
+    body: `Captain Hook's Objective: Defeat Peter Pan at the Jolly Roger.
+In order to achieve this objective, you must unlock the Hangman's Tree location by playing the Never Land Map. Peter Pan must be played, either by you or an opponent, to Hangman's Tree. You will then need to move him to Mermaid Lagoon, then to Skull Rock, and finally to the Jolly Roger, where you must defeat him to win the game.
+
+Special Setup: Place a Lock Token on Hangman's Tree, as that location is locked at the beginning of the game.
+
+Peter Pan: When Peter Pan is revealed, he must immediately be played to Hangman's Tree, even if Hangman's Tree is still locked. If Peter Pan is one of the two cards drawn by an opponent while performing a Fate action targeting you, the opponent must play Peter Pan and discard the other card.
+
+Never Land Map: When you play the Never Land Map, unlock Hangman's Tree by removing the Lock Token from the location.
+Important: Peter Pan may not be moved from Hangman's Tree until it is unlocked.
+
+Controlling your Fate: Unlike other Villains, Captain Hook can play and discard cards from his own Fate deck using Worthy Opponent, Give Them a Scare, and Obsession. Using these cards will help you reveal Peter Pan and bring him into your Realm as soon as possible.
+
+Extra Actions: Cannon, Hook's Case, and Ingenious Device are Items that add extra action symbols to your Realm. After the Item has been played to a location, you may perform the extra action in addition to the other available actions there.`,
+  },
+  prince: {
+    title: "Prince John - Villain Guide",
+    image: "/guides/prince.jpg",
+    body: `Prince John's Objective: Start your turn with at least 20 Power.
+
+Prince John is all about greed, so he needs to accumulate Power. However, as tempting as it might be to save all the Power you can, you will need to spend some Power in order to win. Several Heroes can hinder Prince John's ability to gain Power. It is a good idea to play Allies, even before any Heroes have been played. By doing so, you will be prepared to Vanquish a Hero that is affecting your progress.
+
+The Jail: Prince John's Realm has a location that can be used to his advantage. The Jail does not have any action symbols that can be covered by Heroes, making Heroes at that location less disruptive. Prince John has Imprison cards which allow him to move Heroes to The Jail in order to make actions available elsewhere.
+
+It's Good to Be the King! Although Heroes can be disruptive to his plans, Prince John has several tricks up his sleeve. Cards such as Warrant, Sherriff of Nottingham, and Beautiful, Lovely Taxes allow him to profit from having Heroes in his Realm. Sometimes it pays to keep your enemies close!
+
+Special Fate Cards: When Steal from the Rich is played, 4 Power is taken from Prince John and placed on any one Hero that is in his Realm. When a Hero that has Power on them is defeated, Prince John takes all of the Power back.The same Hero may be used to Steal from the Rich multiple times, which can lead to a big payoff when the Hero is defeated!
+
+While Robin Hood is in Prince John's Realm, every time Prince John gains Power due to an action or card, he gains 1 less Power than he would normally gain. It is usually a good idea to defeat Robin Hood as soon as possible!
+
+When Little John is played, 4 Power is taken from Prince John and placed on Little John's card. When Little John is defeated, Prince John takes all of the Power back. Waiting for just the right time to defeat Little John can help set up an unexpected victory!`,
+  },
+};
 
 
 
@@ -628,6 +682,14 @@ export default function App() {
     setFatePeekCards(fatePeekOriginal);
   };
 
+  const openGuideForCharacter = (characterId: string | null | undefined) => {
+    if (!characterId) { setGuideForId(null); setGuideOpen(true); return; }
+    setGuideForId(characterId);
+    setGuideOpen(true);
+  };
+
+  const closeGuide = () => setGuideOpen(false);
+
 
 
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
@@ -642,7 +704,14 @@ export default function App() {
   const canTakeFromThisDiscard = !!(focusPlayer && myId && focusPlayer.id === myId && isMyTurn);
   const viewingSelf = !!(myId && focusPlayerId === myId);
   const selectedEffect = getSelectedSingleEffect(myHand, selectedIds);
-
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideForId, setGuideForId] = useState<string | null>(null);
+  const currentGuide: GuideEntry | null = guideForId ? (GUIDES[guideForId] ?? null) : null;
+  const focusCharacterId = focusPlayer?.characterId ?? null;
+  const focusCharacterName =
+    focusCharacterId
+      ? (catById?.[focusCharacterId]?.name ?? focusCharacterId)
+      : "—";
   
 
 
@@ -789,6 +858,8 @@ export default function App() {
                     </select>
                   </label>
 
+                  <HelpButton onClick={() => openGuideForCharacter(me.characterId)} />
+
                   <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <input
                       type="checkbox"
@@ -927,6 +998,8 @@ export default function App() {
             isMyTurn={isMyTurn}
             phase={room?.game.phase ?? "lobby"}
             onChangePower={changePower}
+            onOpenGuide={(characterId) => openGuideForCharacter(characterId ?? null)}
+            characterName={focusCharacterName}
           />
           {/* BOARD panel (dark) */}
           <div
@@ -1362,6 +1435,7 @@ export default function App() {
             onCancel={cancelFatePeek}
             onConfirm={confirmFatePeek}
           />
+          
 
 
           {/*chat*/}
@@ -1422,6 +1496,7 @@ export default function App() {
         ) : (
           <p>Not in a room yet.</p>
         )}
+        <GuideModal open={guideOpen} onClose={closeGuide} guide={currentGuide} />
     </div>
     
   );
@@ -1661,17 +1736,23 @@ function InfoBar({
   isMyTurn,
   phase,
   onChangePower,
+  onOpenGuide,
+  characterName,
 }: {
   focusPlayer: Player | null;
   myId: string | null;
   isMyTurn: boolean;
   phase: RoomState["game"]["phase"];
   onChangePower: (delta: number) => void;
+  onOpenGuide: (characterId: string | null | undefined) => void;
+  characterName: string;
 }) {
   if (!focusPlayer) return null;
   const viewingSelf = focusPlayer.id === myId;
   const power = typeof focusPlayer.power === "number" ? focusPlayer.power : 0;
-
+  const leftTitle = viewingSelf
+    ? `${characterName}`
+    : `Viewing: ${focusPlayer.name} (${characterName})`;
   const statusText =
     phase !== "playing"
       ? (phase === "lobby" ? "Lobby" : "Ended")
@@ -1693,19 +1774,24 @@ function InfoBar({
         marginBottom: 12,
       }}
     >
-      <strong style={{ whiteSpace: "nowrap" }}>
-         {viewingSelf ? "" : "Viewing: " + focusPlayer.name}
-      </strong>
+      <strong style={{ whiteSpace: "nowrap" }}>{leftTitle}</strong>
+      <HelpButton onClick={() => onOpenGuide(focusPlayer?.characterId ?? null)} />
       <span style={{ opacity: 0.8 }}>Pawn: L{(focusPlayer.board.moverAt ?? 0) + 1}</span>
       <span style={{ opacity: 0.8 }}>Power: {power}</span>
       
 
-      {viewingSelf && isMyTurn && phase === "playing" && (
-        <div style={{ display: "flex", gap: 6, marginLeft: 6 }}>
-          <button onClick={() => onChangePower(-1)} disabled={!isMyTurn && power <= 0}>-1</button>
-          <button onClick={() => onChangePower(+1)}>+1</button>
-        </div>
-      )}
+      <div style={{ display: "flex", alignItems: "center", minHeight: 40}}>
+        {viewingSelf && isMyTurn && phase === "playing" ? (
+          <div style={{ display: "flex", gap: 6, marginLeft: 6 }}>
+            <button onClick={() => onChangePower(-1)}>-1</button>
+            <button onClick={() => onChangePower(+1)}>+1</button>
+          </div>
+        ) : (
+          <div style={{ height: 30, marginLeft: 6, visibility: "hidden" }}>
+            <button>-1</button><button>+1</button>
+          </div>
+        )}
+      </div>
       <span style={{ marginLeft: "auto", opacity: 0.8 }}>{statusText}</span>
     </div>
   );
@@ -1737,9 +1823,6 @@ function FateBar({
   const fateDeck   = focusPlayer.counts?.fateDeck    ?? 0;
   const fateDisc   = focusPlayer.counts?.fateDiscard ?? 0;
 
-  // local UI for the target picker
-  const [pickOpen, setPickOpen] = useState(false);
-
   const canAct = phase === "playing" && isMyTurn && viewingSelf;
   const disabledReason = !isMyTurn ? "Not your turn" : (!viewingSelf ? "Switch to your board to act" : undefined);
   const [pickMode, setPickMode] = useState<null | "fate" | "peek">(null);
@@ -1752,7 +1835,7 @@ function FateBar({
         border: "1px solid #334155",
         borderRadius: 12,
         padding: 10,
-        background: "#0b1220",
+        background: "#111827",
         color: "#e5e7eb",
         display: "flex",
         alignItems: "center",
@@ -2480,3 +2563,104 @@ function PlayerPickerModal({
     </div>
   );
 }
+function GuideModal({
+  open,
+  onClose,
+  guide,
+}: {
+  open: boolean;
+  onClose: () => void;
+  guide: GuideEntry | null;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.55)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 200,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(1400px, 95vw)",
+          maxHeight: "85vh",
+          overflow: "hidden",
+          background: "#0b1220",
+          color: "#e5e7eb",
+          border: "1px solid #334155",
+          borderRadius: 12,
+          boxShadow: "0 16px 40px rgba(0,0,0,.5)",
+          display: "grid",
+          gridTemplateColumns: "300px 1fr",
+        }}
+      >
+        {/* header */}
+        <div style={{ gridColumn: "1 / -1", padding: "10px 12px", borderBottom: "1px solid #1f2937", display: "flex", alignItems: "center" }}>
+          <strong>{guide?.title ?? "Strategy Guide"}</strong>
+          <span style={{ marginLeft: "auto" }} />
+          <button onClick={onClose}>Close</button>
+        </div>
+
+        {/* image left */}
+        <div style={{ borderRight: "1px solid #1f2937", padding: 12, display: "grid", placeItems: "center" }}>
+          {guide?.image ? (
+            <img
+              src={guide.image}
+              alt=""
+              style={{ maxWidth: "100%", height: "auto", borderRadius: 8, border: "1px solid #334155" }}
+            />
+          ) : (
+            <div style={{ opacity: 0.6 }}>No image</div>
+          )}
+        </div>
+
+        {/* text right */}
+        <div style={{ padding: 12, overflowY: "auto" }}>
+          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+            {guide?.body ?? "No guide has been provided yet."}
+          </div>
+        </div>
+      </div>
+
+      {/* responsive tweak: stack on small screens */}
+      <style>{`
+        @media (max-width: 720px) {
+          [role="dialog"] > div { grid-template-columns: 1fr; }
+        }
+      `}</style>
+    </div>
+  );
+}
+function HelpButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title="Open strategy guide"
+      aria-label="Open strategy guide"
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: "50%",
+        border: "1px solid #a1a1a1ff",
+        color: "#e5e7eb",
+        display: "grid",
+        placeItems: "center",
+        fontWeight: 700,
+        lineHeight: 1,
+        fontSize: 14,
+        cursor: "pointer",
+      }}
+    >
+      ?
+    </button>
+  );
+}
+
