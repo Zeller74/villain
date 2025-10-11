@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useLayoutEffect } from 'react';
 import {makeSocket} from "./socket";
 
 
@@ -53,7 +53,6 @@ type CardFaceProps = {
   showCost?: boolean;
 };
 type GuideEntry = { title: string; image: string; body: string};
-
 const GUIDES: Record<string, GuideEntry> = {
   maleficent: {
     title: "Maleficent - Villain Guide",
@@ -690,6 +689,26 @@ export default function App() {
 
   const closeGuide = () => setGuideOpen(false);
 
+  const onHookPeek = () => {
+    if (!myId) return setLastError("Not in a room");
+    const s = sockRef.current!;
+    s.emit(
+      "fatePeek:start",
+      { targetId: myId, count: 2 },
+      (res: { ok: boolean; error?: string; cards?: Card[]; targetName?: string }) => {
+        if (!res?.ok) return setLastError(res?.error || "Peek failed");
+
+        // Open your existing Peek UI
+        setFatePeekTargetId(myId);
+        setFatePeekTargetName(res.targetName || "You");
+        setFatePeekOriginal(res.cards || []);
+        setFatePeekCards(res.cards || []);
+        setFatePeekOpen(true);
+      }
+    );
+  };
+
+
 
 
   const isMyTurn = !!(room && myId && room.game.activePlayerId === myId);
@@ -1023,7 +1042,6 @@ export default function App() {
                 onStartFate={startFateFor}
                 onReshuffleFate={reshuffleFateDiscardFor}
                 onOpenFateDiscard={openFateDiscardFor}
-                onStartPeek={(targetId, count) => startFatePeek(targetId, count)}
               />
               <div
                 style={{
@@ -1252,23 +1270,6 @@ export default function App() {
               </>
             )}
           </div>
-          
-          <div style={{ marginTop: 12 }}>
-            {focusPlayer && (
-              <DiscardPeek
-                player={focusPlayer}
-                myId={myId}
-                onOpen={() => openDiscard(focusPlayer.id)}
-                onReshuffle={
-                viewingSelf && isMyTurn
-                  ? () => {
-                      reshuffleDiscard();
-                    }
-                  : undefined
-              }
-              />
-            )}
-          </div>
 
           <FatePanel
             open={!!fateTargetId && fateChoices.length > 0 && !fatePlacing}
@@ -1281,130 +1282,165 @@ export default function App() {
           <FatePlaceBanner placing={fatePlacing} />
 
           {/* HAND panel (dark) */}
-          <div
-            style={{
-              border: "1px solid #334155",
-              borderRadius: 12,
-              padding: 12,
-              background: "#1f2937",
-              color: "#e5e7eb",
-            }}
-          >
-            {focusPlayer ? (
-          
-              <>
-                {/* Header: shows whose hand we’re viewing + counts for that player */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    borderBottom: "1px solid #243244",
-                    paddingBottom: 6,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  {/* LEFT: info */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <strong>
-                      {focusPlayerId === myId ? "Your hand" : `${focusPlayer!.name}'s hand`}
-                    </strong>
-                    <span style={{ marginLeft: 8, opacity: 0.8 }}>
-                      Deck: {focusPlayer!.counts?.deck ?? 0}
-                    </span>
-                    <span style={{ opacity: 0.8 }}>· Discard: {focusPlayer!.counts?.discard ?? 0}</span>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 12, alignItems: "start" }}>
+
+            <PlayerPanel
+              viewingSelf={focusPlayerId === myId}
+              characterName={
+                focusPlayer
+                  ? (catById?.[focusPlayer.characterId ?? ""]?.name ?? "")
+                  : ""
+              }
+              characterId={focusPlayer?.characterId ?? null}
+              isMyTurn={isMyTurn}
+              onHookPeek={onHookPeek}
+            />
+            {/*Right hand content */}
+            <div
+              style={{
+                border: "1px solid #334155",
+                borderRadius: 12,
+                padding: 12,
+                background: "#1f2937",
+                color: "#e5e7eb",
+              }}
+            >
+              {focusPlayer && (
+                <DiscardPeek
+                  player={focusPlayer}
+                  myId={myId}
+                  onOpen={() => openDiscard(focusPlayer.id)}
+                  onReshuffle={
+                  viewingSelf && isMyTurn
+                    ? () => {
+                        reshuffleDiscard();
+                      }
+                    : undefined
+                }
+                />
+              )}
+              {focusPlayer ? (
+            
+                <>
+                  {/* Header: shows whose hand we’re viewing + counts for that player */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      borderBottom: "1px solid #243244",
+                      paddingBottom: 6,
+                      flexWrap: "wrap",
+                      border: "1px solid #334155",
+                      borderRadius: 12,
+                      padding: 8,
+                      background: "#111827",
+                      color: "#e5e7eb",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {/* LEFT: info */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <strong>
+                        {focusPlayerId === myId ? "Your hand" : `${focusPlayer!.name}'s hand`}
+                      </strong>
+                      <span style={{ marginLeft: 8, opacity: 0.8 }}>
+                        Deck: {focusPlayer!.counts?.deck ?? 0}
+                      </span>
+                      <span style={{ opacity: 0.8 }}>· Discard: {focusPlayer!.counts?.discard ?? 0}</span>
+                    </div>
+
+                    <span style={{ marginLeft: "auto" }} />
+
+                    {/* Controls appear ONLY when viewing self */}
+                    {focusPlayerId === myId && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+
+                        <button onClick={drawOne} disabled={!isMyTurn} style={{ marginLeft: 8 }}>
+                          Draw 1
+                        </button>
+                        <button
+                          onClick={discardSelected}
+                          disabled={!isMyTurn || selectedIds.size === 0}
+                        >
+                          Discard{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (!selectedEffect) return;
+                            const s = sockRef.current!;
+                            s.emit("game:playEffect", { cardId: selectedEffect.id }, (res: { ok: boolean; error?: string }) => {
+                              if (!res?.ok) return setLastError(res?.error || "Play effect failed");
+                              setSelectedIds(new Set());
+                            });
+                          }}
+                          disabled={!isMyTurn || !selectedEffect}
+                          title={selectedEffect ? "Resolve this effect and discard it" : "Select exactly one effect/condition in your hand"}
+                        >
+                          Play Effect
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  <span style={{ marginLeft: "auto" }} />
-
-                  {/* Controls appear ONLY when viewing self */}
-                  {focusPlayerId === myId && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-
-                      <button onClick={drawOne} disabled={!isMyTurn} style={{ marginLeft: 8 }}>
-                        Draw 1
-                      </button>
-                      <button
-                        onClick={discardSelected}
-                        disabled={!isMyTurn || selectedIds.size === 0}
-                      >
-                        Discard{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (!selectedEffect) return;
-                          const s = sockRef.current!;
-                          s.emit("game:playEffect", { cardId: selectedEffect.id }, (res: { ok: boolean; error?: string }) => {
-                            if (!res?.ok) return setLastError(res?.error || "Play effect failed");
-                            setSelectedIds(new Set());
-                          });
-                        }}
-                        disabled={!isMyTurn || !selectedEffect}
-                        title={selectedEffect ? "Resolve this effect and discard it" : "Select exactly one effect/condition in your hand"}
-                      >
-                        Play Effect
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Cards area */}
-                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {focusPlayerId === myId ? (
-                    // YOU: render real cards with your existing selection UI
-                    myHand.length === 0 ? (
-                      <span style={{ opacity: 0.7, fontSize: 12 }}>Your hand is empty</span>
+                  {/* Cards area */}
+                  <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {focusPlayerId === myId ? (
+                      // YOU: render real cards with your existing selection UI
+                      myHand.length === 0 ? (
+                        <span style={{ opacity: 0.7, fontSize: 12 }}>Your hand is empty</span>
+                      ) : (
+                        myHand.map((c) => {
+                          const selected = selectedIds.has(c.id);
+                          return (
+                            <div key={c.id}
+                              style={{ border: selected ? "2px solid #3b82f6" : "1px solid #475569", borderRadius: 8 }}>
+                            <CardFace
+                              card={c}
+                              locked={!!c.locked}
+                              onClick={() => toggleSelect(c.id)}
+                              canLock={false}
+                              canAdjustStrength={false}
+                              size="sm"
+                            />
+                          </div>
+                          );
+                        })
+                      )
                     ) : (
-                      myHand.map((c) => {
-                        const selected = selectedIds.has(c.id);
-                        return (
-                          <div key={c.id}
-                            style={{ border: selected ? "2px solid #3b82f6" : "1px solid #475569", borderRadius: 8 }}>
-                          <CardFace
-                            card={c}
-                            locked={!!c.locked}
-                            onClick={() => toggleSelect(c.id)}
-                            canLock={false}
-                            canAdjustStrength={false}
-                            size="sm"
-                          />
-                        </div>
-                        );
-                      })
-                    )
-                  ) : (
-                    // SPECTATING: render concealed tiles equal to their hand count
-                    (focusPlayer.counts?.hand ?? 0) === 0 ? (
-                      <span style={{ opacity: 0.7, fontSize: 12 }}>
-                        {focusPlayer.name}'s hand is empty
-                      </span>
-                    ) : (
-                      Array.from({ length: focusPlayer.counts.hand }).map((_, idx) => (
-                        <div
-                          key={idx}
-                          title="Hidden card"
-                          style={{
-                            minWidth: 90, height: 130,
-                            padding: 8,
-                            border: "1px solid #475569",
-                            borderRadius: 8,
-                            background:
-                              "repeating-linear-gradient(135deg, #626886ff, #061027ff 10px, #0e1b36ff 10px, #02050cff 20px)",
-                            color: "#94a3b8",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            textAlign: "center", fontSize: 12,
-                            userSelect: "none",
-                          }}
-                        >
-                        </div>
-                      ))
-                    )
-                  )}
-                </div>
-              </>
-            ) : (
-              <span style={{ opacity: 0.7 }}>No player focused.</span>
-            )}
+                      // SPECTATING: render concealed tiles equal to their hand count
+                      (focusPlayer.counts?.hand ?? 0) === 0 ? (
+                        <span style={{ opacity: 0.7, fontSize: 12 }}>
+                          {focusPlayer.name}'s hand is empty
+                        </span>
+                      ) : (
+                        Array.from({ length: focusPlayer.counts.hand }).map((_, idx) => (
+                          <div
+                            key={idx}
+                            title="Hidden card"
+                            style={{
+                              minWidth: 90, height: 130,
+                              padding: 8,
+                              border: "1px solid #475569",
+                              borderRadius: 8,
+                              background:
+                                "repeating-linear-gradient(135deg, #626886ff, #061027ff 10px, #0e1b36ff 10px, #02050cff 20px)",
+                              color: "#94a3b8",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              textAlign: "center", fontSize: 12,
+                              userSelect: "none",
+                            }}
+                          >
+                          </div>
+                        ))
+                      )
+                    )}
+                  </div>
+                </>
+              ) : (
+                <span style={{ opacity: 0.7 }}>No player focused.</span>
+              )}
+            </div>
           </div>
 
           
@@ -1812,7 +1848,6 @@ function FateBar({
   onStartFate,        // choose a target (self allowed)
   onReshuffleFate,    // reshuffle fate discard → fate deck (for a given player)
   onOpenFateDiscard,  // open fate discard viewer (for a given player)
-  onStartPeek,
 }: {
   focusPlayer: Player | null;
   myId: string | null;
@@ -1822,7 +1857,6 @@ function FateBar({
   onStartFate: (targetId: string) => void;
   onReshuffleFate: (playerId: string) => void;
   onOpenFateDiscard: (playerId: string) => void;
-  onStartPeek: (targetId: string, count: number) => void;
 }) {
   if (!focusPlayer) return null;
 
@@ -1832,8 +1866,7 @@ function FateBar({
 
   const canAct = phase === "playing" && isMyTurn && viewingSelf;
   const disabledReason = !isMyTurn ? "Not your turn" : (!viewingSelf ? "Switch to your board to act" : undefined);
-  const [pickMode, setPickMode] = useState<null | "fate" | "peek">(null);
-  const [peekCount, setPeekCount] = useState(2);
+  const [pickOpen, setPickOpen] = useState(false);
 
 
   return (
@@ -1866,48 +1899,22 @@ function FateBar({
       {/* Start Fate (self or others) */}
       <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
         <button
-          onClick={() => setPickMode("fate")}
+          onClick={() => setPickOpen(true)}
           disabled={!canAct}
           title={canAct ? "Choose a player to Fate" : "Your turn required"}
         >
           Fate…
         </button>
-        <button
-          onClick={() => setPickMode("peek")}
-          disabled={!canAct}
-          title={canAct ? "Peek target’s fate deck" : "Your turn required"}
-        >
-          Peek…
-        </button>
       </div>
       <PlayerPickerModal
-        open={!!pickMode}
-        title={pickMode === "fate" ? "Choose a player to Fate" : "Peek fate deck"}
+        open={pickOpen}
+        title="Choose a player to Fate"
         players={players}
         myId={myId}
-        onClose={() => setPickMode(null)}
-        extra={pickMode === "peek" ? (
-          <div style={{ marginTop: 10 }}>
-            <label style={{ fontSize: 14 }}>
-              Cards to peek:{" "}
-              <input
-                type="number"
-                min={1}
-                max={4}
-                value={peekCount}
-                onChange={(e) => setPeekCount(Math.max(1, Math.min(4, Number(e.target.value) || 1)))}
-                style={{ width: 56, padding: "4px 6px", marginLeft: 6 }}
-              />
-            </label>
-          </div>
-        ) : null}
+        onClose={() => setPickOpen(false)}
         onPick={(targetId) => {
-          if (pickMode === "fate") {
-            onStartFate(targetId);
-          } else {
-            onStartPeek(targetId, peekCount);
-          }
-          setPickMode(null);
+          onStartFate(targetId);
+          setPickOpen(false);
         }}
       />
 
@@ -2145,6 +2152,7 @@ function LocationActions({
 }) {
   const baseOpacity = locked ? 0.45 : isActive ? 1 : 0.75;
 
+
   return (
     <div
       style={{
@@ -2170,26 +2178,38 @@ function LocationActions({
         <span style={{ fontSize: 12, color: "#94a3b8" }}>No actions</span>
       ) : (
         actions.map((a, idx) => {
-          const blocked = hasTopCover && idx < topSlots; // 👈 first topSlots turn red if any Top cards
-          return (
-            <span
-              key={`${a}-${idx}`}
-              style={{
-                fontSize: 12,
-                lineHeight: 1,
-                padding: "4px 8px",
-                borderRadius: 999,
-                border: `1px solid ${blocked ? "#7f1d1d" : "#475569"}`,
-                background: "#111827",
-                color: blocked ? "#f87171" : "#e5e7eb",
-                whiteSpace: "nowrap",
-              }}
-              title={blocked ? "Blocked by Hero (Top covered)" : "Action"}
-            >
-              {ACTION_LABELS[a]}
-            </span>
-          );
-        })
+        const isTop = idx < topSlots;
+        const blocked = hasTopCover && isTop; 
+
+        const border = blocked ? "#7f1d1d" : isTop ? "#9b6c2cff" : "#475569"; // red | amber | slate
+        const color  = blocked ? "#f87171" : isTop ? "#ffd770ff" : "#e5e7eb"; // red | amber | light
+
+        return (
+          <span
+            key={`${a}-${idx}`}
+            style={{
+              fontSize: 12,
+              lineHeight: 1,
+              padding: "4px 8px",
+              borderRadius: 999,
+              border: `1px solid ${border}`,
+              background: "#111827",
+              color,
+              whiteSpace: "nowrap",
+            }}
+            title={
+              blocked
+                ? "Top slot blocked by a Hero"
+                : isTop
+                ? "Top slot (blocked when a Hero is here)"
+                : "Bottom slot action"
+            }
+          >
+            {ACTION_LABELS[a]}
+          </span>
+        );
+      })
+
       )}
       {locked && (
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#fca5a5" }}>🔒 Locked</span>
@@ -2703,6 +2723,193 @@ function HelpButton({ onClick }: { onClick: () => void }) {
     >
       ?
     </button>
+  );
+}
+function PlayerPanel({
+  viewingSelf,
+  characterName,
+  characterId,
+  isMyTurn,
+  onHookPeek,
+}: {
+  viewingSelf: boolean;
+  characterName: string;
+  characterId?: string | null;
+  isMyTurn: boolean;
+  onHookPeek: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  // Simple initials as avatar fallback
+  const initials =
+    (characterName || "?")
+      .split(" ")
+      .map(s => s[0]?.toUpperCase())
+      .slice(0, 2)
+      .join("") || "?";
+
+  const contRef = useRef<HTMLDivElement | null>(null);
+  const [placeRight, setPlaceRight] = useState(true);
+  useLayoutEffect(() => {
+    if (!open || !contRef.current) return;
+    const r = contRef.current.getBoundingClientRect();
+    const spaceRight = window.innerWidth - r.right;
+    // need about ~220px; adjust if your menu is wider
+    setPlaceRight(spaceRight >= 220);
+  }, [open]);
+
+  return (
+    <div
+      style={{
+        width: 80,
+        minWidth: 80,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 8,
+      }}
+    >
+      <div style={{ position: "relative" }}>
+        {/* Avatar */}
+        <div
+          title={characterName || "Character"}
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: "999px",
+            border: "1px solid #334155",
+            background: "#0b1220",
+            color: "#e5e7eb",
+            display: "grid",
+            placeItems: "center",
+            fontWeight: 700,
+            fontSize: 18,
+            userSelect: "none",
+          }}
+        >
+          {initials}
+        </div>
+
+        {/* Caret/menu trigger (disabled if not viewing self) */}
+        <button
+          onClick={() => setOpen(v => !v)}
+          disabled={!viewingSelf}
+          title={viewingSelf ? "Character actions" : "View your own board to use actions"}
+          aria-label="Character actions"
+          style={{
+            position: "absolute",
+            top: -6,
+            right: -6,
+            width: 22,
+            height: 22,
+            borderRadius: "999px",
+            border: "1px solid #334155",
+            background: "#111827",
+            color: "#e5e7eb",
+            display: "grid",
+            placeItems: "center",
+            fontSize: 12,
+            opacity: viewingSelf ? 1 : 0.6,
+            cursor: viewingSelf ? "pointer" : "default",
+            padding: 0,
+            transform: open? "rotate(180deg)" : "none",
+          }}
+        >
+          ▾
+        </button>
+
+        {/* Popover menu (stub) */}
+        {open && (
+          <div
+            ref={contRef}
+            style={{
+              position: "absolute",
+              zIndex: 30,
+              minWidth: 180,
+              border: "1px solid #334155",
+              borderRadius: 8,
+              background: "#111827",
+              color: "#e5e7eb",
+              boxShadow: "0 12px 24px rgba(0,0,0,.35)",
+              padding: 6,
+              ...(placeRight
+                ? { top: 0, left: 72 }
+                : { top: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)" }
+              ),
+            }}
+          >
+            <div
+              style={{
+                padding: "6px 8px",
+                fontSize: 12,
+                opacity: 0.8,
+                borderBottom: "1px solid #334155",
+                marginBottom: 6,
+              }}
+            >
+              Character actions
+            </div>
+
+            {/* Actions list */}
+            {/* Hook action */}
+            {characterId === "captain" ? (
+              <button
+                onClick={onHookPeek}
+                disabled={!viewingSelf || !isMyTurn}
+                title={
+                  !viewingSelf ? "View your own board to use actions"
+                  : !isMyTurn ? "Your turn required"
+                  : "Look at the top 2 cards of your Fate deck and reorder them"
+                }
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid transparent",
+                  background: "transparent",
+                  color: (!viewingSelf || !isMyTurn) ? "#9ca3af" : "#e5e7eb",
+                  cursor: (!viewingSelf || !isMyTurn) ? "not-allowed" : "pointer",
+                }}
+              >
+                Peek Fate (2)
+              </button>
+            ) : (
+              <button
+                disabled
+                title="No character-specific actions yet"
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid transparent",
+                  background: "transparent",
+                  color: "#9ca3af",
+                  cursor: "not-allowed",
+                }}
+              >
+                (No actions available)
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Tiny caption (wraps if long) */}
+      <div
+        style={{
+          maxWidth: 72,
+          textAlign: "center",
+          fontSize: 11,
+          color: "#cbd5e1",
+          wordBreak: "break-word",
+        }}
+        title={characterName}
+      >
+        {characterName || "—"}
+      </div>
+    </div>
   );
 }
 

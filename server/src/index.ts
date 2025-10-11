@@ -552,7 +552,7 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
     for (const p of room.players) { if (p.id === d.targetId) { targetName = p.name; break; } }
     return {
       id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "fate_peek",
-      text: `${name} arranged the top ${d.count} of ${targetName}'s fate deck`,
+      text: `${name} arranged the top ${d.count} cards of ${targetName}'s fate deck`,
     };
   }
   if (e.type === "fate_return" && e.data.type === "fate_return") {
