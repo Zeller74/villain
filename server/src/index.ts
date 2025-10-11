@@ -6,11 +6,11 @@ type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, 
 type Card = {id: string; type: CardType; label: string; faceUp: boolean; locked?: boolean; desc?: string; cost: number; baseStrength?: number | null; strength?: number;};
 type CardType = "Ally" | "Item" | "Condition" | "Effect" | "Hero" | "Cheat" | "Guardian" | "Curse" | "Ingredient" | "Maui" | "Omnidroid" | "Prince" | "Prisoner" | "Relic" | "Remote" | "Titan"
 type Zones = {deck: Card[]; hand: Card[]; discard: Card[]; fateDeck: Card[]; fateDiscard: Card[]};
-type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number; won?: boolean;};
+type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number; won?: boolean; handPublic?: boolean};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession; fatePeek?: FatePeekSession};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek" | "fate_return";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek" | "fate_return" | "reveal_hand";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -37,7 +37,8 @@ type ActionEntry = {
     | { type: "fate_discard_both"; targetId: string; cardIds: string[] }
     | { type: "play_effect"; cardId: string }
     | { type: "fate_peek"; targetId: string; count: number}
-    | { type: "fate_return"; targetId: string; cardId: string};
+    | { type: "fate_return"; targetId: string; cardId: string}
+    | { type: "reveal_hand"; prev: boolean; next: boolean };
 
   undone?: boolean;
 };
@@ -256,6 +257,8 @@ function emitRoomState(io: Server, roomId: string) {
         fateDiscard: fateDiscard.length,
       },
       discardTop,
+      handPublic: !!p.handPublic,
+      publicHand: p.handPublic ? p.zones.hand.slice() : null,
       board: {
         moverAt: typeof board.moverAt === "number" ? board.moverAt : 0,
         locations,
@@ -564,6 +567,13 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} returned a fate card to ${targetName}'s deck and reshuffled`,
     };
   }
+  if (e.type === "reveal_hand" && e.data.type === "reveal_hand") {
+    const next = e.data.next;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "reveal_hand",
+      text: `${name} ${next ? "revealed" : "hid"} their hand`,
+    };
+  }
 
 
   //fallback
@@ -731,7 +741,7 @@ io.on("connection", (socket) => {
         rooms.set(roomId, room);
 
         //join as player
-        const player: Player = { id: socket.id, name, ready: false, characterId: null, zones: {deck: [], hand:[], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0 };
+        const player: Player = { id: socket.id, name, ready: false, characterId: DEFAULT_CHARACTER_ID, zones: {deck: [], hand:[], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0, handPublic: false, };
         room.players.push(player);
         socket.join(roomId);
         socket.data.roomId = roomId;
@@ -757,7 +767,7 @@ io.on("connection", (socket) => {
         }
         //avoid dupes
         if (!room.players.some(p => p.id === socket.id)) {
-            room.players.push({id: socket.id, name, ready: false, characterId: DEFAULT_CHARACTER_ID, zones: {deck: [], hand: [], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0,});
+            room.players.push({id: socket.id, name, ready: false, characterId: DEFAULT_CHARACTER_ID, zones: {deck: [], hand: [], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0, handPublic: false,});
             if (!room.game.activePlayerId && room.players.length > 0) {
                 const first = room.players[0]
                 if (first) room.game.activePlayerId = first.id;
@@ -2052,6 +2062,37 @@ io.on("connection", (socket) => {
       emitRoomState(io, roomId);
       ack?.({ ok: true });
     });
+    socket.on("char:toggleHandReveal", (_: unknown, ack?: (res:{ok:boolean; error?:string; next?: boolean})=>void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok:false, error:"not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok:false, error:"room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok:false, error:"game not started" });
+
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok:false, error:"player not found" });
+
+      // Gate to Maleficent only:
+      if (me.characterId !== "maleficent") {
+        return ack?.({ ok:false, error:"only Maleficent can reveal hand" });
+      }
+
+      const prev = !!me.handPublic;
+      me.handPublic = !prev;
+
+      // Log
+      pushLog(io, roomId, {
+        id: nowId(),
+        ts: Date.now(),
+        actorId: me.id,
+        type: "reveal_hand",
+        data: { type: "reveal_hand", prev, next: me.handPublic }
+      });
+
+      emitRoomState(io, roomId);
+      ack?.({ ok:true, next: me.handPublic });
+    });
+
 
 
 

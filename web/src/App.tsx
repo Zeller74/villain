@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useLayoutEffect } from 'react';
 import {makeSocket} from "./socket";
 
 
-type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number; fateDeck?: number; fateDiscard?: number}; discardTop: Card | null; board: Board; power?: number;};
+type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number; fateDeck?: number; fateDiscard?: number}; discardTop: Card | null; board: Board; power?: number; publicHand?: Card[] | null; handPublic?: boolean;};
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
@@ -731,7 +731,7 @@ export default function App() {
     focusCharacterId
       ? (catById?.[focusCharacterId]?.name ?? focusCharacterId)
       : "—";
-  
+  const showPublicHand = !!focusPlayer?.handPublic && Array.isArray(focusPlayer?.publicHand);
 
 
  
@@ -1294,6 +1294,12 @@ export default function App() {
               characterId={focusPlayer?.characterId ?? null}
               isMyTurn={isMyTurn}
               onHookPeek={onHookPeek}
+              onToggleReveal={() => {
+                sockRef.current!.emit("char:toggleHandReveal", {}, (res: {ok:boolean; error?:string}) => {
+                  if (!res?.ok) setLastError(res.error || "Toggle reveal failed");
+                });
+              }}
+              handPublic={!!focusPlayer?.handPublic}
             />
             {/*Right hand content */}
             <div
@@ -1409,11 +1415,27 @@ export default function App() {
                       )
                     ) : (
                       // SPECTATING: render concealed tiles equal to their hand count
-                      (focusPlayer.counts?.hand ?? 0) === 0 ? (
-                        <span style={{ opacity: 0.7, fontSize: 12 }}>
-                          {focusPlayer.name}'s hand is empty
-                        </span>
+                      <>
+                      { showPublicHand ? (
+                        focusPlayer!.publicHand!.length === 0 ? (
+                          <span style={{ opacity: 0.7, fontSize: 12 }}>
+                            {focusPlayer!.name}'s hand is empty
+                          </span>
+                        ) : (
+                          focusPlayer!.publicHand!.map(c => (
+                            <div key={c.id} style={{ border: "1px solid #475569", borderRadius: 8 }}>
+                              <CardFace
+                                card={c}
+                                locked={!!c.locked}
+                                canLock={false}
+                                canAdjustStrength={false}
+                                size="sm"
+                              />
+                            </div>
+                          ))
+                        )
                       ) : (
+                        // fallback: concealed tiles (what you already had)
                         Array.from({ length: focusPlayer.counts.hand }).map((_, idx) => (
                           <div
                             key={idx}
@@ -1433,7 +1455,8 @@ export default function App() {
                           >
                           </div>
                         ))
-                      )
+                      )}
+                      </>
                     )}
                   </div>
                 </>
@@ -2731,12 +2754,16 @@ function PlayerPanel({
   characterId,
   isMyTurn,
   onHookPeek,
+  onToggleReveal,
+  handPublic,
 }: {
   viewingSelf: boolean;
   characterName: string;
   characterId?: string | null;
   isMyTurn: boolean;
   onHookPeek: () => void;
+  onToggleReveal: () => void;
+  handPublic: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -2757,7 +2784,7 @@ function PlayerPanel({
     // need about ~220px; adjust if your menu is wider
     setPlaceRight(spaceRight >= 220);
   }, [open]);
-
+  
   return (
     <div
       style={{
@@ -2851,8 +2878,7 @@ function PlayerPanel({
             </div>
 
             {/* Actions list */}
-            {/* Hook action */}
-            {characterId === "captain" ? (
+            {characterId === "captain" && (
               <button
                 onClick={onHookPeek}
                 disabled={!viewingSelf || !isMyTurn}
@@ -2861,37 +2887,29 @@ function PlayerPanel({
                   : !isMyTurn ? "Your turn required"
                   : "Look at the top 2 cards of your Fate deck and reorder them"
                 }
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "6px 8px",
-                  borderRadius: 6,
-                  border: "1px solid transparent",
-                  background: "transparent",
-                  color: (!viewingSelf || !isMyTurn) ? "#9ca3af" : "#e5e7eb",
-                  cursor: (!viewingSelf || !isMyTurn) ? "not-allowed" : "pointer",
-                }}
+                style={btnStyle(viewingSelf && isMyTurn)}
               >
                 Peek Fate (2)
               </button>
-            ) : (
+            )}
+
+            {characterId === "maleficent" && (
               <button
-                disabled
-                title="No character-specific actions yet"
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "6px 8px",
-                  borderRadius: 6,
-                  border: "1px solid transparent",
-                  background: "transparent",
-                  color: "#9ca3af",
-                  cursor: "not-allowed",
-                }}
+                onClick={onToggleReveal}
+                disabled={!viewingSelf}  // does not require turn; just your board
+                title={viewingSelf ? "Toggle whether your hand is visible to others" : "View your own board to use actions"}
+                style={btnStyle(viewingSelf)}
               >
+                {handPublic ? "Hide Hand" : "Reveal Hand"}
+              </button>
+            )}
+
+            {(!characterId || (characterId !== "captain" && characterId !== "maleficent")) && (
+              <button disabled style={btnStyle(false)} title="No character-specific actions yet">
                 (No actions available)
               </button>
             )}
+
           </div>
         )}
       </div>
@@ -2911,5 +2929,17 @@ function PlayerPanel({
       </div>
     </div>
   );
+}
+function btnStyle(enabled: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    textAlign: "left",
+    padding: "6px 8px",
+    borderRadius: 6,
+    border: "1px solid transparent",
+    background: "transparent",
+    color: enabled ? "#e5e7eb" : "#9ca3af",
+    cursor: enabled ? "pointer" : "not-allowed",
+  };
 }
 
