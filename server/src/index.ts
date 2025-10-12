@@ -9,8 +9,8 @@ type Zones = {deck: Card[]; hand: Card[]; discard: Card[]; fateDeck: Card[]; fat
 type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number; won?: boolean; handPublic?: boolean};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
-type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession; fatePeek?: FatePeekSession};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek" | "fate_return" | "reveal_hand";
+type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession; fatePeek?: FatePeekSession; fateSift?: FateSiftSession};
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek" | "fate_return" | "reveal_hand" | "fate_sift";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -38,13 +38,15 @@ type ActionEntry = {
     | { type: "play_effect"; cardId: string }
     | { type: "fate_peek"; targetId: string; count: number}
     | { type: "fate_return"; targetId: string; cardId: string}
-    | { type: "reveal_hand"; prev: boolean; next: boolean };
+    | { type: "reveal_hand"; prev: boolean; next: boolean }
+    | { type: "fate_sift"; targetId: string; keptCardId?: string | undefined; discardedCardId: string};
 
   undone?: boolean;
 };
 type LogItem = {id: string; ts: number; actorId: string; actorName: string; type: ActionType | "undo"; text: string}
 type FateSession = {actorId: string; targetId: string; drawn: Card[]; chosenId?: string};
 type FatePeekSession = { actorId: string; targetId: string; drawn: Card[]};
+type FateSiftSession = { actorId: string; targetId: string; drawn: Card[]};
 type ActionKind =
   | "gain1" | "gain2" | "gain3"
   | "play"
@@ -156,7 +158,7 @@ const CHARACTERS_DATA: readonly [
     id: "prince",
     name: "Prince John",
     locations: [
-      { name: "Sherwodd Forest", actions: ["gain1", "discard", "play", "fate"], topSlots: 2 },
+      { name: "Sherwood Forest", actions: ["gain1", "discard", "play", "fate"], topSlots: 2 },
       { name: "Friar Tuck's Church", actions: ["gain2", "play", "play", "moveItemAlly"], topSlots: 2 },
       { name: "Nottingham", actions: ["fate", "gain1", "vanquish", "play"], topSlots: 2 },
       { name: "The Jail", actions: ["gain3", "play", "discard"], topSlots: 0 },
@@ -192,6 +194,49 @@ const CHARACTERS_DATA: readonly [
       { label: "Robin Hood", type: "Hero", description: "The amount of Power that Prince John gains from each card or action is reduced by 1 Power.", cost: null, strength: 5, copies: 1},
       { label: "Skippy", type: "Hero", description: "Wolf Archers cannot be used to defeat Skippy.", cost: null, strength: 2, copies: 1},
       { label: "Toby", type: "Hero", description: "When Toby is defeated, shuffle him back into Prince John's Fate deck.", cost: null, strength: 2, copies: 1},
+    ],
+  },
+  {
+    id: "lady",
+    name: "Lady Tremaine",
+    locations: [
+      { name: "Cinderella's Room", actions: ["play", "moveItemAlly", "discard", "gain3"], topSlots: 2 },
+      { name: "The Music Room", actions: ["fate", "gain2", "play", "play"], topSlots: 2 },
+      { name: "The Castle", actions: ["play", "discard", "fate", "gain1"], topSlots: 2 },
+      { name: "The Ballroom", actions: ["activate", "play", "moveItemAlly"], topSlots: 0 },
+    ],
+    deck: [
+      { label: "There's Still a Chance", type: "Effect", description: "Choose one: Move Item/Ally or Activate", cost: 2, strength: null, copies: 4},
+      { label: "I Said 'If'", type: "Effect", description: "Shuffle your Villain discard pile back into your deck. Draw two cards.", cost: 2, strength: null, copies: 3},
+      { label: "Trapped", type: "Effect", description: "Place a Trapped Token on a Hero in your Realm", cost: 1, strength: null, copies: 3},
+      { label: "And One More Thing", type: "Condition", description: "During their turn, if another player takes a Discard action, you may play And One More Thing. You may discard any number of cards and draw back up to four cards.", cost: null, strength: null, copies: 2},
+      { label: "I Never Go Back on My Word", type: "Effect", description: "Shuffle your Fate discard pile back into your Fate deck. Look at the top four Fate cards and replace them in any order.", cost: 2, strength: null, copies: 2},
+      { label: "Locked Up", type: "Condition", description: "During their turn, if another player takes a Vanquish action, you may play Locked Up. You may place a Trapped Token on any Hero in your Realm.", cost: null, strength: null, copies: 2},
+      { label: "Vicious Practical Jokes", type: "Condition", description: "During their turn, if another player targets you with a Fate action, you may play Vicious Practical Jokes. Of the two Fate cards chosen, you pick which card is played and where.", cost: null, strength: null, copies: 2},
+      { label: "You Little Thief!", type: "Effect", description: "Defeat Cinderella or Ball Gown Cinderella", cost: 0, strength: null, copies: 2},
+      { label: "Anastasia", type: "Ally", description: "Discard Anastasia from your Realm to play Ball Gown Anastasia. Anastasia may not be played if Ball Gown Anastasia is in play.", cost: 1, strength: 1, copies: 1},
+      { label: "Ball Gown Anastasia", type: "Ally", description: "You must discard Anastasia from your Realm to play Ball Gown Anastasia.", cost: 2, strength: 2, copies: 1},
+      { label: "Drizella", type: "Ally", description: "Discard Drizella from your Realm to play Ball Gown Drizella. Drizella may not be played if Ball Gown Drizella is in play.", cost: 1, strength: 1, copies: 1},
+      { label: "Invitation From The King", type: "Item", description: "When Invitation From The King is played, unlock The Ballroom. If The Prince is not in play, find and play him to The Ballroom. Activate: Look at the top two cards of your Fate deck. Discard one and leave the other face down on top.", cost: 3, strength: null, copies: 1},
+      { label: "Lady Tremaine's Cane", type: "Item", description: "Activate: Remove a Glass Slipper", cost: 2, strength: null, copies: 1},
+      { label: "Lucifer", type: "Ally", description: "Place a Trapped Token on a Hero in Lucifer's location.", cost: 3, strength: 3, copies: 1},
+      { label: "Midnight", type: "Effect", description: "Defeat All Heroes in your Realm. Find and play both Glass Slippers.", cost: 4, strength: null, copies: 1},
+      { label: "The Key", type: "Item", description: "When The Key is played, move Cinderella to Cinderella's Room. Put a Trapped Token on her. Activate: Move any Hero to Cinderella's Room and put a Trapped Token on them.", cost: 2, strength: null, copies: 1},
+      { label: "Wedding Bells", type: "Item", description: "Activate: Can only be Activated when The Prince and either Ball Gown Anastasia or Ball Gown Drizella are in The Ballroom and no Glass Slippers are in play. Activate this card to win the game!", cost: 4, strength: null, copies: 1},
+      
+    ],
+    fateDeck: [
+      { label: "Bibbidi-Bobbidi-Boo", type: "Effect", description: "Remove a Trapped Token from any Hero, then move that Hero to a new location.", cost: null, strength: null, copies: 3},
+      { label: "Sweet Nightingale", type: "Effect", description: "Move an Ally to any location.", cost: null, strength: null, copies: 3},
+      { label: "Glass Slipper", type: "Item", description: "This Glass Slipper does not attach to a Hero and must be played to Cinderella's Room. Lady Tremaine cannot win the game while a Glass Slipper is in her Realm.", cost: null, strength: null, copies: 2},
+      { label: "Ball Gown Cinderella", type: "Hero", description: "Discard Cinderella to play Ball Gown Cinderella. While Ball Gown Cinderella is in play, no Allies may enter The Ballroom. This card cannot be Trapped. When Ball Gown Cinderella is defeated, find both Glass Slippers and play them.", cost: null, strength: 2, copies: 1},
+      { label: "Bruno", type: "Hero", description: "When Bruno is played or moved, move Lucifer to his location.", cost: null, strength: 3, copies: 1},
+      { label: "Cinderella", type: "Hero", description: "While Cinderella is in play, all Effect cards cost +2 Power. Cinderella may not be played if Ball Gown Cinderella is in play.", cost: null, strength: 2, copies: 1},
+      { label: "Fairy Godmother", type: "Hero", description: "When Fairy Godmother is played, find and play Ball Gown Cinderella. While Fairy Godmother is in play, only Fate cards can move Allies.", cost: null, strength: 4, copies: 1},
+      { label: "Gus", type: "Hero", description: "While Gus is in play, all Item cards cost +2 Power.", cost: null, strength: 1, copies: 1},
+      { label: "Jaq", type: "Hero", description: "When Jaq is played or moved, discard one Item from his new location.", cost: null, strength: 1, copies: 1},
+      { label: "The Prince", type: "Prince", description: "When The Prince is revealed, you MUST PLAY HIM IMMEDIATELY to The Ballroom, even if it is locaked.", cost: null, strength: null, copies: 1},
+      
     ],
   },
 ];
@@ -386,6 +431,17 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} undid their last action`,
     };
   }
+  if (e.type === "fate_sift" && e.data.type === "fate_sift") {
+    const d = e.data as Extract<ActionEntry["data"], { type: "fate_sift" }>;
+    const actor = room.players.find(p => p.id === e.actorId);
+    const name = actor?.name ?? e.actorId.slice(0, 6);
+    const target = room.players.find(p => p.id === d.targetId)?.name ?? "player";
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "fate_sift",
+      text: `${name} sifted fate for ${target}: discarded ${d.discardedCardId.slice(0,6)}${d.keptCardId ? `, kept ${d.keptCardId.slice(0,6)} on top` : ""}`,
+    };
+  }
+
 
   if (e.type === "draw" && e.data.type === "draw") {
     const n = e.data.cardIds.length;
@@ -2092,6 +2148,90 @@ io.on("connection", (socket) => {
       emitRoomState(io, roomId);
       ack?.({ ok:true, next: me.handPublic });
     });
+    socket.on("fateSift:start", (payload: { targetId?: string }, ack) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok: false, error: "not your turn" });
+
+      // target: allow self by default; you can later add a picker
+      const targetId = (payload?.targetId || socket.id).trim();
+      const target = room.players.find(p => p.id === targetId);
+      if (!target) return ack?.({ ok: false, error: "target not found" });
+
+      // Prevent overlapping sifts by other players
+      if (room.fateSift && room.fateSift.actorId !== socket.id) {
+        return ack?.({ ok: false, error: "another fate sift is active" });
+      }
+
+      const drawn: Card[] = [];
+      for (let i = 0; i < 2; i++) {
+        const c = target.zones.fateDeck.pop();
+        if (!c) break;
+        drawn.push(c); // drawn[0] was the topmost
+      }
+      if (drawn.length === 0) return ack?.({ ok: false, error: "fate deck empty" });
+
+      room.fateSift = { actorId: socket.id, targetId, drawn };
+      ack?.({ ok: true, cards: drawn, targetName: target.name });
+    });
+    socket.on("fateSift:choose", (payload: { discardId: string }, ack) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+
+      const sess = room.fateSift;
+      if (!sess || sess.actorId !== socket.id) return ack?.({ ok: false, error: "no active sift" });
+
+      const target = room.players.find(p => p.id === sess.targetId);
+      if (!target) { delete room.fateSift; return ack?.({ ok: true }); }
+
+      const discard = sess.drawn.find(c => c.id === payload?.discardId);
+      if (!discard) return ack?.({ ok: false, error: "invalid choice" });
+
+      // other card (if any) goes back on top (last pushed becomes top)
+      const other = sess.drawn.find(c => c.id !== discard.id) || null;
+      if (other) target.zones.fateDeck.push(other);
+      // chosen goes to fate discard
+      target.zones.fateDiscard.push(discard);
+
+      pushLog(io, roomId, {
+        id: nowId(),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "fate_sift",
+        data: { type: "fate_sift", targetId: target.id, keptCardId: other?.id, discardedCardId: discard.id },
+      });
+
+      delete room.fateSift;
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
+    socket.on("fateSift:cancel", (_: unknown, ack) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+
+      const sess = room.fateSift;
+      if (!sess || sess.actorId !== socket.id) return ack?.({ ok: false, error: "no active sift" });
+
+      const target = room.players.find(p => p.id === sess.targetId);
+      if (target) {
+        // reverse so drawn[0] becomes top again
+        for (let i = sess.drawn.length - 1; i >= 0; i--) {
+          const c = sess.drawn[i];
+          if (c) target.zones.fateDeck.push(c);
+        }
+      }
+      delete room.fateSift;
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
+
 
 
 

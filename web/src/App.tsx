@@ -104,6 +104,26 @@ While Robin Hood is in Prince John's Realm, every time Prince John gains Power d
 
 When Little John is played, 4 Power is taken from Prince John and placed on Little John's card. When Little John is defeated, Prince John takes all of the Power back. Waiting for just the right time to defeat Little John can help set up an unexpected victory!`,
   },
+  lady: {
+    title: "Lady Tremaine - Villain Guide",
+    image: "/guides/lady.jpg",
+    body: `Lady Tremaine's Objective: Marry Drizella or Anastasia to the Prince.
+
+To achieve Lady Tremaine's Objective, the Prince must be played from her Fate deck to The Ballroom, which must be unlocked by playing Invitation From the King, and you must move Ball Gown Anastasia to The Ballroom. While there, you must activate the Wedding Bells card.
+
+Special Setup: Place a Lock Token on The Ballroom. This location is locked at the beginning of the game. Lady Tremaine cannot move to The Ballroom until it becomes unlocked.
+
+Going to the Ball: Once The Ballroom is unlocked by playing Invitation From the King, The Ballroom cannot be re-locked.
+Only four characters can be played or moved to The Ballroom: The Prince (who is played there immediately when revealed), Ball Gown Cinderella, Ball Gown Drizella, and Ball Gown Anastasia. While in play, Ball Gown Cinderella prevents Ball Gown Drizella or Ball Gown Anastasia from entering The Ballroom. This card has no effect if they are already there. Sweet Nightingale is a powerful Fate card that may slow your progress to The Ballroom by moving any Ally to a new location.
+Ball Gown Cinderella, Ball Gown Drizella, and Ball Gown Anastasia can only be played by first playing Cinderella, Drizella, or Anastasia in their everyday dresses then discarding them to play their Ball Gown versions to the same location. This swap requires a Play a Card action. There can never be two versions of a character in play at the same time.
+Important: Fairy Godmother can play Ball Gown Cinderella even if Cinderella is not in play. If this occurs, you may play Ball Gown Cinderella to any unlocked location.
+
+Trapped!: Cards like Lucifer, The Key, and Trapped allow you to place a Trapped Token on a Hero in your Realm. When a Hero has a Trapped Token, their Ability is ignored, as if the card has no Ability at all. The card still remains in play and blocks your actions.
+Ball Gown Cinderella cannot be Trapped by any card, although she can still be moved using the Activate action of The Key. Lady Tremaine has no Vanquish actions. However, players can use Activate actions to discard or defeat Fate cards from play. Cards such as Lady Tremaine's Cane, Midnight, and You Little Thief all remove specific Hero and Item cards from your Realm.
+
+Glass Slippers: Unlike other Items in the Fate card deck, Glass Slippers do not attach to a Hero. You cannot win the game while a Glass Slipper is in your Realm. You can remove a Glass Slipper by Activating Lady Tremaine's Cane. Note: The Prince card is a Prince, not a Hero. The Prince is not affected by cards targeting Heroes.
+`,
+  },
 };
 
 
@@ -145,6 +165,10 @@ export default function App() {
   const [fatePeekTargetName, setFatePeekTargetName] = useState<string>("");
   const [fatePeekCards, setFatePeekCards] = useState<Card[]>([]);
   const [fatePeekOriginal, setFatePeekOriginal] = useState<Card[]>([]);
+  const [siftOpen, setSiftOpen] = useState(false);
+  const [siftCards, setSiftCards] = useState<Card[]>([]);
+  const [siftTargetName, setSiftTargetName] = useState<string>("Player");
+
 
 
 
@@ -707,6 +731,86 @@ export default function App() {
       }
     );
   };
+
+  const startTremaineSift = () => {
+    const s = sockRef.current!;
+    s.emit(
+      "fateSift:start",
+      {}, // self-target for now; extend later with { targetId }
+      (res: { ok: boolean; error?: string; cards?: Card[]; targetName?: string }) => {
+        if (!res?.ok) return setLastError(res?.error || "Sift failed");
+        setSiftCards(res.cards || []);
+        setSiftTargetName(res.targetName || "Player");
+        setSiftOpen(true);
+      }
+    );
+  };
+
+  const chooseTremaineSift = (keepId?: string) => {
+    const s = sockRef.current!;
+    s.emit(
+      "fateSift:choose",
+      { keepId },
+      (res: { ok: boolean; error?: string }) => {
+        if (!res?.ok) return setLastError(res?.error || "Choose failed");
+        setSiftOpen(false);
+        setSiftCards([]);
+        setSiftTargetName("");
+      }
+    );
+  };
+
+  const cancelTremaineSift = () => {
+    const s = sockRef.current!;
+    s.emit("fateSift:cancel", {}, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Cancel failed");
+      setSiftOpen(false);
+      setSiftCards([]);
+    });
+  };
+
+  const onDiscardOne = (discardId: string) => {
+    const s = sockRef.current!;
+    s.emit("fateSift:choose", { discardId }, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Sift choose failed");
+      setSiftOpen(false);
+      setSiftCards([]);
+      setSiftTargetName("");
+    });
+  };
+
+  const onTremainePlan = () => {
+    if (!myId) return;
+    const s = sockRef.current!;
+    const meId = myId;
+
+    //1: shuffle fate discard
+    s.emit("fate:reshuffleDeck", { playerId: meId }, (r: { ok: boolean; error?: string }) => {
+      if (!r?.ok) {
+        setLastError(r?.error || "Shuffle failed");
+        return;
+      }
+
+      //2: peek top 4
+      s.emit(
+        "fatePeek:start",
+        { targetId: meId, count: 4 },
+        (res: { ok: boolean; error?: string; cards?: Card[]; targetName?: string }) => {
+          if (!res?.ok) {
+            setLastError(res?.error || "Peek failed");
+            return;
+          }
+          // Open your existing peek UI
+          setFatePeekTargetId(meId);
+          setFatePeekTargetName(res.targetName || "You");
+          setFatePeekOriginal(res.cards || []);
+          setFatePeekCards(res.cards || []);
+          setFatePeekOpen(true);
+        }
+      );
+    });
+  };
+
 
 
 
@@ -1300,6 +1404,8 @@ export default function App() {
                 });
               }}
               handPublic={!!focusPlayer?.handPublic}
+              onTremaineSift={startTremaineSift}
+              onTremainePlan={onTremainePlan}
             />
             {/*Right hand content */}
             <div
@@ -1501,7 +1607,15 @@ export default function App() {
             onCancel={cancelFatePeek}
             onConfirm={confirmFatePeek}
           />
-          
+          <FateSiftModal
+            open={siftOpen}
+            cards={siftCards}
+            targetName={siftTargetName}
+            onClose={cancelTremaineSift}
+            onDiscardOne={onDiscardOne}
+          />
+
+
 
 
           {/*chat*/}
@@ -2756,6 +2870,8 @@ function PlayerPanel({
   onHookPeek,
   onToggleReveal,
   handPublic,
+  onTremaineSift,
+  onTremainePlan,
 }: {
   viewingSelf: boolean;
   characterName: string;
@@ -2764,6 +2880,8 @@ function PlayerPanel({
   onHookPeek: () => void;
   onToggleReveal: () => void;
   handPublic: boolean;
+  onTremaineSift: () => void;
+  onTremainePlan: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -2775,15 +2893,38 @@ function PlayerPanel({
       .slice(0, 2)
       .join("") || "?";
 
-  const contRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const caretRef = useRef<HTMLButtonElement | null>(null);
   const [placeRight, setPlaceRight] = useState(true);
   useLayoutEffect(() => {
-    if (!open || !contRef.current) return;
-    const r = contRef.current.getBoundingClientRect();
+    if (!open || !menuRef.current) return;
+    const r = menuRef.current.getBoundingClientRect();
     const spaceRight = window.innerWidth - r.right;
     // need about ~220px; adjust if your menu is wider
     setPlaceRight(spaceRight >= 220);
   }, [open]);
+  useEffect(() => {
+    if (!open) return;
+
+    const onMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t)) return;     // clicked inside menu
+      if (caretRef.current?.contains(t)) return;    // clicked the caret
+      setOpen(false);                               // clicked outside -> close
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
   
   return (
     <div
@@ -2819,6 +2960,7 @@ function PlayerPanel({
 
         {/* Caret/menu trigger (disabled if not viewing self) */}
         <button
+          ref={caretRef}
           onClick={() => setOpen(v => !v)}
           disabled={!viewingSelf}
           title={viewingSelf ? "Character actions" : "View your own board to use actions"}
@@ -2848,7 +2990,7 @@ function PlayerPanel({
         {/* Popover menu (stub) */}
         {open && (
           <div
-            ref={contRef}
+            ref={menuRef}
             style={{
               position: "absolute",
               zIndex: 30,
@@ -2878,6 +3020,30 @@ function PlayerPanel({
             </div>
 
             {/* Actions list */}
+            {characterId === "lady" && (
+              <>
+                <button
+                  onClick={onTremaineSift}
+                  disabled={!viewingSelf || !isMyTurn}
+                  title={!viewingSelf ? "View your own board to use actions" : (!isMyTurn ? "Your turn required" : "Look at top 2 fate cards, discard 1, keep 1 on top")}
+                  style={btnStyle(viewingSelf && isMyTurn)}
+                >
+                  Invitation From the King
+                </button>
+                <button
+                  onClick={onTremainePlan}
+                  disabled={!viewingSelf || !isMyTurn}
+                  title={
+                    !viewingSelf ? "View your own board to use actions"
+                    : !isMyTurn ? "Your turn required"
+                    : "Shuffle fate discard into fate deck, then peek top 4 and reorder"
+                  }
+                  style={btnStyle(viewingSelf && isMyTurn)}
+                >
+                  I Never Go Back On My Word
+                </button>
+              </>
+            )}
             {characterId === "captain" && (
               <button
                 onClick={onHookPeek}
@@ -2889,7 +3055,7 @@ function PlayerPanel({
                 }
                 style={btnStyle(viewingSelf && isMyTurn)}
               >
-                Peek Fate (2)
+                Give Them a Scare
               </button>
             )}
 
@@ -2904,7 +3070,7 @@ function PlayerPanel({
               </button>
             )}
 
-            {(!characterId || (characterId !== "captain" && characterId !== "maleficent")) && (
+            {(!characterId || (characterId === "Prince John")) && (
               <button disabled style={btnStyle(false)} title="No character-specific actions yet">
                 (No actions available)
               </button>
@@ -2942,4 +3108,98 @@ function btnStyle(enabled: boolean): React.CSSProperties {
     cursor: enabled ? "pointer" : "not-allowed",
   };
 }
+function FateSiftModal({
+  open,
+  cards,
+  targetName,
+  onDiscardOne,
+  onClose,
+}: {
+  open: boolean;
+  cards: Card[];
+  targetName: string;
+  onDiscardOne: (discardId: string) => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  const twoCards = cards.slice(0, 2);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,.55)",
+        display: "grid", placeItems: "center", zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(560px, 90vw)", maxHeight: "70vh", overflowY: "auto",
+          background: "#111827", color: "#e5e7eb",
+          border: "1px solid #334155", borderRadius: 12, padding: 12,
+          boxShadow: "0 12px 30px rgba(0,0,0,.45)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <strong>Fate Sift — {targetName}</strong>
+          <span style={{ marginLeft: "auto" }} />
+          <button onClick={onClose}>Cancel</button>
+        </div>
+
+        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9 }}>
+          Choose <em>one</em> card to discard. The other will be returned face down on top.
+        </div>
+
+        <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+          {twoCards.length === 0 ? (
+            <div style={{ opacity: 0.7 }}>No cards to sift.</div>
+          ) : (
+            twoCards.map((c, idx) => (
+              <div
+                key={c.id}
+                role="button"
+                tabIndex={0}
+                onMouseEnter={() => setHoverId(c.id)}
+                onMouseLeave={() => setHoverId(null)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onDiscardOne(c.id); }}
+                onClick={() => onDiscardOne(c.id)}
+                title="Discard this card (the other goes on top)"
+                style={{
+                  position: "relative",
+                  cursor: "pointer",
+                  border: "1px solid " + (hoverId === c.id ? "#60a5fa" : "#475569"),
+                  boxShadow: hoverId === c.id ? "0 0 0 2px rgba(96,165,250,.35)" : "none",
+                  borderRadius: 8,
+                  padding: 6,
+                  transition: "box-shadow .12s ease, border-color .12s ease",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute", top: 6, left: 8, fontSize: 11, opacity: 0.7,
+                  }}
+                >
+                  {idx === 0 ? "Top (1)" : "Next (2)"}
+                </div>
+                <CardFace
+                  card={c}
+                  showCost={false}
+                  canLock={false}
+                  canAdjustStrength={false}
+                  size="md"
+                />
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
