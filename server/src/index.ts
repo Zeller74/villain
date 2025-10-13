@@ -10,7 +10,8 @@ type Player = {id: string; name: string, ready: boolean; characterId: string | n
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession; fatePeek?: FatePeekSession; fateSift?: FateSiftSession};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek" | "fate_return" | "reveal_hand" | "fate_sift" | "trust";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" 
+| "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek" | "fate_return" | "reveal_hand" | "fate_sift" | "trust" | "char_flip_buzz" | "fate_discard_one" | "fate_find_hero";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -40,7 +41,11 @@ type ActionEntry = {
     | { type: "fate_return"; targetId: string; cardId: string}
     | { type: "reveal_hand"; prev: boolean; next: boolean }
     | { type: "fate_sift"; targetId: string; keptCardId?: string | undefined; discardedCardId: string}
-    | { type: "trust"; delta: number; prev: number; next: number };
+    | { type: "trust"; delta: number; prev: number; next: number }
+    | { type: "char_flip_buzz"; loc: 0 | 1 | 2 | 3; fromRow: "top"|"bottom"; toRow: "top"|"bottom"; fromLabel: string; toLabel: string}
+    | { type: "fate_discard_one"; targetId: string; cardId: string }
+    | { type: "fate_find_hero"; targetId: string; revealed: number; found: boolean; heroId?: string };
+
 
   undone?: boolean;
 };
@@ -74,6 +79,7 @@ const io = new Server(PORT, {
 });
 const rooms = new Map<string, Room>();
 const MAX_POWER = 50;
+
 
 const CHARACTERS_DATA: readonly [
   CharacterTemplate,
@@ -283,6 +289,50 @@ const CHARACTERS_DATA: readonly [
       { label: "Ulf", type: "Hero", description: "Allies may not be moved from Ulf's location.", cost: null, strength: 2, copies: 1},
     ],
   },
+  {
+    id: "lotso",
+    name: "Lotso",
+    locations: [
+      { name: "Caterpillar Room", actions: ["discard", "play", "gain1",], topSlots: 0 },
+      { name: "The Library", actions: ["fate", "gain2", "play", "activate"], topSlots: 2 },
+      { name: "The Playground", actions: ["play", "discard", "fate", "gain3"], topSlots: 2 },
+      { name: "Tricounty Landfill", actions: ["play", "vanquish", "play", "moveItemAlly"], topSlots: 2 },
+    ],
+    deck: [
+      { label: "Locked Up", type: "Effect", description: "All Heroes in the Caterpillar Room get -1 Strength.", cost: 3, strength: null, copies: 3},
+      { label: "Not Age Appropriate", type: "Effect", description: "Move any Hero in your Realm or any Buzz Lightyear to the Caterpillar Room.", cost: 2, strength: null, copies: 3},
+      { label: "Something Snapped", type: "Condition", description: "During their turn, if another player discards one or more cards, you may play Something Snapped. Move all Heroes to the Caterpillar Room.", cost: null, strength: null, copies: 3},
+      { label: "The Bookworm", type: "Effect", description: "Pay any amount of Power to play The Bookworm. Reduce a Hero's Strength by that amount.", cost: 0, strength: 0, copies: 3},
+      { label: "Welcome to Sunnyside", type: "Effect", description: "Reveal from the top of your Fate deck until you reveal a Hero. Play that Hero to the Caterpillar Room. Discard the rest.", cost: 2, strength: null, copies: 3},
+      { label: "Original Factory Settings", type: "Effect", description: "Flip Buzz Lightyear to Demo Mode Buzz Lightyear and move him to any location at the bottom of Lotso's Realm. All Heroes lose 1 Strength.", cost: 2, strength: null, copies: 2},
+      { label: "Patrolling All Night Long", type: "Effect", description: "Choose a Hero who is not at the Caterpillar room. That Hero gets -1 Strength.", cost: 2, strength: null, copies: 2},
+      { label: "Smells Like Strawberries", type: "Condition", description: "During their turn, if another player takes a Fate action, you may play Smells like Strawberries. Shuffle your discard pile back into your deck.", cost: null, strength: null, copies: 2},
+      { label: "Where's Your Kid Now?", type: "Condition", description: "During their turn, if another player defeats a Hero with a Strength of 2 or more, you may play Where's Your Kid Now?. Choose a Hero at Lotso's location and reduce their Strength to 0.", cost: null, strength: null, copies: 2},
+      { label: "Big Baby", type: "Ally", description: "Activate: Reveal cards from the top of your Fate deck until you reveal a Hero. Play that Hero to any location except the Caterpillar Room.", cost: 3, strength: 3, copies: 1},
+      { label: "Chunk", type: "Ally", description: "Chunk gets +1 Strength if Sparks is in Lotso's Realm", cost: 1, strength: 1, copies: 1},
+      { label: "New Toys Don't Stand a Chance", type: "Effect", description: "All Heroes in the Caterpillar Room lose Strength equal to the number of Heroes in the Caterpillar Room.", cost: 4, strength: null, copies: 1},
+      { label: "Sparks", type: "Ally", description: "Sparks gets +1 Strength if Twitch is in Lotso's Realm.", cost: 1, strength: 1, copies: 1},
+      { label: "Stretch", type: "Ally", description: "Activate: Move a Hero or Guardian in Stretch's location to any location in Lotso's Realm.", cost: 2, strength: 2, copies: 1},
+      { label: "Twitch", type: "Ally", description: "Twitch gets +1 Strength if Chunk is in Lotso's Realm.", cost: 1, strength: 2, copies: 1},
+      { label: "Woody's Hat", type: "Item", description: "All Heroes in Lotso's Realm except Woody get -1 Strength.", cost: 2, strength: null, copies: 1},
+      
+    ],
+    fateDeck: [
+      { label: "Bonnie's Toys", type: "Effect", description: "Choose a Hero with reduced Strength and remove all Strength reduction tokens from that Hero,", cost: null, strength: null, copies: 2},
+      { label: "One Way Out", type: "Effect", description: "Move a Hero in the Caterpillar Room to any other location.", cost: null, strength: null, copies: 2},
+      { label: "The Claw", type: "Effect", description: "Choose a Hero with 0 Strength in Lotso's Realm. Discard that Hero, removing all Strength tokens, then shuffle Lotso's Fate discard pile back into his Fate deck.", cost: null, strength: null, copies: 2},
+      { label: "Spanish Mode", type: "Effect", description: "Flip Buzz Lightyear to his Guardian side and move him to the top of Lotso's Realm at The Playground. If Jessie is in Lotso's Realm, she gains 1 Strength.", cost: null, strength: null, copies: 1},
+      { label: "Spanish Mode", type: "Effect", description: "Flip Buzz Lightyear to his Guardian side and move him to the top of Lotso's Realm at Tricounty Landfill. If Jessie is in Lotso's Realm, she gains 1 Strength.", cost: null, strength: null, copies: 1},
+      { label: "Andy's Looking For Us", type: "Effect", description: "All Heroes with 1 or more Strength get +2 Strength. Heroes with 0 Strength are not affected.", cost: null, strength: null, copies: 1},
+      { label: "Daisy's Locket", type: "Effect", description: "When Daisy's Locket is played, discard Big Baby. Shuffle Lotso's Fate discard pile into his Fate deck.", cost: null, strength: null, copies: 1},
+      { label: "Hamm", type: "Hero", description: "When performing a Vanquish action to defeat Hamm, at least two Allies must be used.", cost: null, strength: 2, copies: 1},
+      { label: "Jessie", type: "Hero", description: "When Jessie is played, you may discard any Ally from Lotso's Realm.", cost: null, strength: 3, copies: 1},
+      { label: "Lotso was Special", type: "Effect", description: "Discard an Ally from Lotso's Realm.", cost: null, strength: null, copies: 1},
+      { label: "Rex", type: "Hero", description: "When performing a Vanquish action, Rex cannot be targeted if there are other Heroes in his location. Rex cannot lose Strength if other Heroes are in his location.", cost: null, strength: 1, copies: 1},
+      { label: "Woody", type: "Hero", description: "When Woody is played, you may move all Heroes in the Caterpillar Room to any other location. If Woody's Hat is in Lotso's Realm, discard it.", cost: null, strength: 5, copies: 1},
+      
+    ],
+  },
 ];
 
 type CharacterId = (typeof CHARACTERS_DATA)[number]["id"];
@@ -474,6 +524,40 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       actorName: name,
       type: "undo",
       text: `${name} undid their last action`,
+    };
+  }
+  if (e.type === "fate_find_hero" && e.data.type === "fate_find_hero") {
+    const d = e.data;
+    const target = room.players.find(p => p.id === d.targetId);
+    const targetName = target ? target.name : d.targetId.slice(0, 6);
+
+    const base = `${name} revealed from ${targetName}'s fate deck until a Hero (${d.revealed} card${d.revealed === 1 ? "" : "s"})`;
+    const tail = d.found ? ` — found ${d.heroId || "a Hero"}` : ` — no Hero found`;
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "fate_find_hero",
+      text: base + tail,
+    };
+  }
+
+  if (e.type === "fate_discard_one" && e.data.type === "fate_discard_one") {
+    const d = e.data as Extract<ActionEntry["data"], { type: "fate_discard_one" }>;
+    const name = room.players.find(p => p.id === e.actorId)?.name ?? e.actorId.slice(0, 6);
+
+    let targetName = "player";
+    for (const p of room.players) { if (p.id === d.targetId) { targetName = p.name; break; } }
+
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "fate_discard_one",
+      text: `${name} discarded ${d.cardId} from ${targetName}'s fate reveal.`,
+    };
+  }
+
+  if (e.type === "char_flip_buzz" && e.data.type === "char_flip_buzz") {
+    const d = e.data as Extract<ActionEntry["data"], { type: "char_flip_buzz" }>;
+    const lane = (d.loc + 1);
+    return {
+      id: e.id, ts: e.ts, actorId: e.actorId, actorName: name, type: "char_flip_buzz",
+      text: `${name} flipped ${d.fromLabel} → ${d.toLabel} at L${lane}`,
     };
   }
   if (e.type === "trust" && e.data.type === "trust") {
@@ -863,6 +947,34 @@ function applyCharacterSetup(player: Player) {
   }
 }
 
+function makeBuzz(): Card {
+  return {
+    id: nanoid(8),
+    label: "Buzz Lightyear",
+    faceUp: true,
+    cost: 0,
+    baseStrength: null,
+    strength: 0,
+    type: "Guardian",
+    desc: "Neither Buzz Lightyear nor any Heroes in his location can be targeted by Vanquish actions.",
+  };
+}
+
+function makeDemoBuzz(): Card {
+  return {
+    id: nanoid(8),
+    label: "Demo Mode Buzz Lightyear",
+    faceUp: true,
+    cost: 0,
+    baseStrength: 1,
+    strength: 0,
+    type: "Ally",
+    desc: "Demo Mode Buzz Lightyear can only be used in a Vanquish action with at least one other Ally. Demo Mode Buzz Lightyear is not discarded when used to defeat a Hero. Heroes defeated in a Vanquish action using Demo Mode Buzz Lightyear are moved to the Caterpillar Room.",
+  };
+}
+
+function isHero(c: Card) {return c.type === "Hero";} 
+
 
 
 
@@ -1031,6 +1143,10 @@ io.on("connection", (socket) => {
           shuffle(p.zones.deck);
           shuffle(p.zones.fateDeck);
           applyCharacterSetup(p);
+          if(p.characterId === "lotso"){
+            const L = p.board.locations[0];
+            if (L) L.top.push(makeBuzz());
+          }
         }
 
         //transition to playing
@@ -2349,6 +2465,200 @@ io.on("connection", (socket) => {
       emitRoomState(io, room.id);
       ack?.({ ok:true });
     });
+    socket.on("lotso:flipBuzz", (_: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      type LocIdx = 0 | 1 | 2 | 3;
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok: false, error: "not your turn" });
+
+      const me = room.players.find(p => p.id === socket.id);
+      if (!me) return ack?.({ ok: false, error: "player not found" });
+      if (me.characterId !== "lotso") return ack?.({ ok: false, error: "only Lotso can flip Buzz" });
+
+      // search board for Buzz or Demo Buzz
+      let found: { loc: LocIdx; row: "top"|"bottom"; idx: number } | null = null;
+      for (let i = 0; i < 4; i++) {
+        const L = me.board.locations[i];
+        if (!L) continue;
+        const tIdx = L.top.findIndex(c => c.label === "Buzz Lightyear");
+        if (tIdx !== -1) { found = { loc: i as 0|1|2|3, row: "top", idx: tIdx }; break; }
+        const bIdx = L.bottom.findIndex(c => c.label === "Demo Mode Buzz Lightyear");
+        if (bIdx !== -1) { found = { loc: i as 0|1|2|3, row: "bottom", idx: bIdx }; break; }
+      }
+
+      if (!found) return ack?.({ ok: false, error: "Buzz (any side) not found on your board" });
+
+      const L = me.board.locations[found.loc];
+      if (!L) return ack?.({ ok: false, error: "location missing" });
+
+      if (found.row === "top") {
+        // Remove Buzz from TOP → add Demo Buzz to BOTTOM
+        const old = L.top.splice(found.idx, 1)[0];
+        if (!old) return ack?.({ok: false, error: "Buzz index invalid (top)"});
+        const next = makeDemoBuzz();
+        L.bottom.push(next);
+
+        pushLog(io, roomId, {
+          id: nowId(),
+          ts: Date.now(),
+          actorId: me.id,
+          type: "char_flip_buzz",
+          data: { type: "char_flip_buzz", loc: found.loc, fromRow: "top", toRow: "bottom", fromLabel: old.label, toLabel: next.label }
+        });
+      } else {
+        // Remove Demo from BOTTOM → add Buzz to TOP
+        const old = L.bottom.splice(found.idx, 1)[0];
+        if (!old) return ack?.({ok: false, error: "Buzz index invalid (bottom)"});
+        const next = makeBuzz();
+        L.top.push(next);
+
+        pushLog(io, roomId, {
+          id: nowId(),
+          ts: Date.now(),
+          actorId: me.id,
+          type: "char_flip_buzz",
+          data: { type: "char_flip_buzz", loc: found.loc, fromRow: "bottom", toRow: "top", fromLabel: old.label, toLabel: next.label }
+        });
+      }
+
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
+    socket.on("fateFindHero:start", (payload: { targetId: string }, ack?: (res: { ok: boolean; error?: string; card?: Card; targetName?: string; revealed?: number; }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok: false, error: "game not started" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok: false, error: "not your turn" });
+
+      const target = room.players.find(p => p.id === (payload?.targetId || ""));
+      if (!target) return ack?.({ ok: false, error: "target not found" });
+
+      //1) Quick existence check to avoid infinite reshuffle when no heroes at all
+      const heroExists =
+        target.zones.fateDeck.some(isHero) ||
+        target.zones.fateDiscard.some(isHero);
+
+      if (!heroExists) {
+        pushLog(io, roomId, {
+          id: nowId(),
+          ts: Date.now(),
+          actorId: socket.id,
+          type: "fate_find_hero",
+          data: { type: "fate_find_hero", targetId: target.id, revealed: 0, found: false }
+        });
+        emitRoomState(io, roomId);
+        return ack?.({ ok: true, targetName: target.name, revealed: 0 });
+      }
+
+      // 2) Reveal until hero with a safety cap
+      let revealed = 0;
+      let found: Card | null = null;
+
+      // cap ~ total cards + some buffer
+      let safety = target.zones.fateDeck.length + target.zones.fateDiscard.length + 8;
+
+      const shuffle = (arr: Card[]) => {
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const a = arr[i]!;
+          const b = arr[j]!;
+          arr[i] = b;              // arr[j] exists for 0<=j<=i
+          arr[j] = a;
+        }
+      };
+
+      while (safety-- > 0) {
+        let c = target.zones.fateDeck.pop();
+        if (!c) {
+          // reshuffle discard into deck (if any)
+          if (target.zones.fateDiscard.length === 0) break;
+          while (target.zones.fateDiscard.length) {
+            const d = target.zones.fateDiscard.pop()!;
+            target.zones.fateDeck.push(d);
+          }
+          shuffle(target.zones.fateDeck);
+          c = target.zones.fateDeck.pop();
+          if (!c) break;
+        }
+
+        revealed++;
+        if (isHero(c)) { found = c; break; }
+        target.zones.fateDiscard.push(c);
+      }
+
+      if (!found) {
+        // No hero after consuming the pool; just log + return
+        pushLog(io, roomId, {
+          id: nowId(),
+          ts: Date.now(),
+          actorId: socket.id,
+          type: "fate_find_hero",
+          data: { type: "fate_find_hero", targetId: target.id, revealed, found: false }
+        });
+        emitRoomState(io, roomId);
+        return ack?.({ ok: true, targetName: target.name, revealed }); // no `card` field
+      }
+
+      // Put found hero into a normal fate session so your existing FatePanel flows
+      room.fate = { actorId: socket.id, targetId: target.id, drawn: [found] };
+
+      pushLog(io, roomId, {
+        id: nowId(),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "fate_find_hero",
+        data: { type: "fate_find_hero", targetId: target.id, revealed, found: true, heroId: found.label }
+      });
+
+      emitRoomState(io, roomId);
+          ack?.({ ok: true, card: found, targetName: target.name, revealed });
+    });
+    socket.on("fate:discardSelected", (_: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId as string | null;
+      if (!roomId) return ack?.({ ok: false, error: "not in a room" });
+      const room = rooms.get(roomId);
+      if (!room) return ack?.({ ok: false, error: "room not found" });
+      if (!room.fate || room.fate.actorId !== socket.id) return ack?.({ ok: false, error: "no active fate" });
+
+      const sess = room.fate;
+      const target = room.players.find(p => p.id === sess.targetId);
+      if (!target) { delete room.fate; emitRoomState(io, roomId); return ack?.({ ok: true }); }
+
+      // choose the intended card
+      const chosen = sess.chosenId
+        ? sess.drawn.find(c => c.id === sess.chosenId)
+        : sess.drawn[0];
+
+      if (!chosen) return ack?.({ ok: false, error: "no chosen card" });
+
+      // If there’s somehow another drawn card, put it back on the fate deck
+      const other = sess.drawn.find(c => c.id !== chosen.id) || null;
+      if (other) target.zones.fateDeck.push(other);
+
+      // Discard the chosen one
+      target.zones.fateDiscard.push(chosen);
+
+      // Log
+      pushLog(io, roomId, {
+        id: nowId(),
+        ts: Date.now(),
+        actorId: socket.id,
+        type: "fate_discard_one",
+        data: { type: "fate_discard_one", targetId: target.id, cardId: chosen.id }
+      });
+
+      delete room.fate;
+      emitRoomState(io, roomId);
+      ack?.({ ok: true });
+    });
+
+
+
 
 
 

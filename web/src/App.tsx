@@ -142,6 +142,27 @@ Gaining Trust: There are several cards that can gain Trust. When Hair Brush is p
 
 Strategy Tips: Some cards are most effective if played when Rapunzel is at Rapunzel's Tower. Sincer Rapunzel will move toward Corona at the end of your turn, moving her to Rapunzel's Tower or keeping her there will allow you to gain more Trust from those cards. Playing Effect or Condition cards and using Allies to defeat Rapunzel can move her to Rapunzel's Tower.`,
   },
+  lotso: {
+    title: "Lotso - Villain Guide",
+    image: "/guides/lotso.jpg",
+    body: `Lotso's Objective: Have 4 Heroes with a Strength of 0 and Buzz Lightyear in the Caterpillar Room.
+    
+Special Setup: Place Buzz Lightyear at the top of Lotso's Realm in the Caterpillar Room with his Guardian side facing up.
+
+Reducing Heroes' Strength: Lotso has two ways to reduce Heroes' Strength: with Vanquish actions and with cards. To reduce a Hero's Strength, add Strength modifier tokens to the card. Important: Unlike the normal rules, if a Hero in Lotso's Realm is at 0 Strength, they cannot use their ability. When Lotso Vanquishes a Hero, he does not discard them from his Realm. Instead, he reduces their Strength to 0 using Strength tokens. The Hero stays on Lotso's Realm where they are. Lotso still discards the Ally or Allies used in the Vanquish action.Lotso can also reduce Strength with specific cards.
+
+The Caterpillar Room: Lotso has several ways to move Heroes to the Caterpillar Room and keep them there. Stretch and Welcome to Sunnyside move Heroes into the Caterpillar Room. These can be used at any time regardless of a Hero's Strength.
+
+Controlling Lotso's Fate: Some Heroes are more difficult for Lotso to subdue. For example, Rex's Strength can only be reduced by cards or by a Vanquish action if he is the only Hero in a location. Hamm can only be Vanquished by two or more Allies.
+
+Buzz Lightyear: Depending on his settings Buzz Lightyear can be either Lotso's Ally or a Guardian of Heroes.
+Buzz Lightyear starts as a Guardian. He is not considered a Hero and cannot be targeted by Vanquish actions. Original Factory Settings flips Buzz Lightyear to Demo Mode Buzz Lightyear, Lotso's Ally. Flip over the tile and move Demo Mode Buzz Lightyear to the bottom of Lotso's Realm.
+
+Demo Mode Buzz Lightyear cannot be discarded from Lotso's Realm. Cards targeting Allies, such as Jessie and Lotso Was Special, do not affect Demo Mode Buzz Lightyear. Spanish Mode can flip Buzz Lightyear back to his Guardian side. Flip over the tile and move it back to the top of Lotso's Realm.
+
+Either Buzz Lightyear or Demo Mode Buzz Lightyear must be in the Caterpillar Room for Lotso to win.
+`,
+  },
 };
 
 
@@ -829,6 +850,36 @@ export default function App() {
     });
   };
 
+  const startFindHero = (targetId: string) => {
+    const s = sockRef.current!;
+    s.emit(
+      "fateFindHero:start",
+      { targetId },
+      (res: { ok: boolean; error?: string; card?: Card | null; targetName?: string; revealed?: number }) => {
+        if (!res?.ok) {
+          setLastError(res?.error || "Find Hero failed");
+          return;
+        }
+        // If a hero is found, show the FatePanel with that one card.
+        if (res.card) {
+          setFateTargetId(targetId);
+          setFateChoices([res.card]);  // your FatePanel will open with this
+        } else {
+          setLastError(`No hero found in ${res.targetName || "opponent"}’s fate deck.`);
+        }
+      }
+    );
+  };
+
+  const discardSelectedFate = () => {
+    sockRef.current!.emit("fate:discardSelected", {}, (res: { ok: boolean; error?: string }) => {
+      if (!res?.ok) return setLastError(res?.error || "Discard failed");
+      setFateTargetId(null);
+      setFateChoices([]);
+      setFatePlacing(null);
+    });
+  };
+
 
 
 
@@ -1399,6 +1450,7 @@ export default function App() {
             onPlay={chooseFateCard}
             onCancel={cancelFate}
             onDiscardBoth={fateChoices.length >= 2 ? discardBothFate : undefined}
+            onDiscardSelected={fateChoices.length === 1 ? discardSelectedFate : undefined}
           />
 
           <FatePlaceBanner placing={fatePlacing} />
@@ -1431,6 +1483,13 @@ export default function App() {
                   if(!res?.ok) setLastError(res?.error || "Trust change failed");
                 });
               }}
+              onLotsoFlip={() => {
+                sockRef.current!.emit("lotso:flipBuzz", {}, (res:{ok:boolean; error?:string}) => {
+                  if (!res?.ok) setLastError(res?.error || "Flip failed");
+                });
+              }}
+              myId={myId}
+              onFindHero={(targetId) => startFindHero(targetId)}
             />
             {/*Right hand content */}
             <div
@@ -2029,6 +2088,7 @@ function FateBar({
   const canAct = phase === "playing" && isMyTurn && viewingSelf;
   const disabledReason = !isMyTurn ? "Not your turn" : (!viewingSelf ? "Switch to your board to act" : undefined);
   const [pickOpen, setPickOpen] = useState(false);
+  const pickable = players.filter(p => p.id !== myId);
 
 
   return (
@@ -2071,7 +2131,7 @@ function FateBar({
       <PlayerPickerModal
         open={pickOpen}
         title="Choose a player to Fate"
-        players={players}
+        players={pickable}
         myId={myId}
         onClose={() => setPickOpen(false)}
         onPick={(targetId) => {
@@ -2112,14 +2172,17 @@ function FatePanel({
   onPlay,
   onCancel,
   onDiscardBoth,
+  onDiscardSelected,
 }: {
   open: boolean;
   cards: Card[];
   onPlay: (card: Card) => void;
   onCancel: () => void;
   onDiscardBoth?: () => void;
+  onDiscardSelected?: () => void;
 }) {
   if (!open) return null;
+  const single = cards.length === 1;
   return (
     <div
       style={{
@@ -2134,13 +2197,18 @@ function FatePanel({
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <strong>Fate: choose a card to play</strong>
         <span style={{ marginLeft: "auto" }} />
-        {onDiscardBoth && cards.length >= 2 && (   // ✅ use props, not outer vars
+        {onDiscardBoth && cards.length >= 2 && (
           <button
             onClick={onDiscardBoth}
             title="Send both revealed fate cards to discard"
             style={{ marginLeft: 6 }}
           >
             Discard Both
+          </button>
+        )}
+        {onDiscardSelected && single && (
+          <button onClick={onDiscardSelected} title="Discard this card instead of playing it">
+            Discard
           </button>
         )}
         <button onClick={onCancel}>Cancel</button>
@@ -2899,6 +2967,9 @@ function PlayerPanel({
   onTremainePlan,
   trust,
   onChangeTrust,
+  onLotsoFlip,
+  myId,
+  onFindHero,
 }: {
   viewingSelf: boolean;
   characterName: string;
@@ -2911,6 +2982,9 @@ function PlayerPanel({
   onTremainePlan: () => void;
   trust?: number;
   onChangeTrust?: (delta: number) => void;
+  onLotsoFlip?: () => void;
+  myId: string | null;
+  onFindHero: (targetId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -3049,6 +3123,31 @@ function PlayerPanel({
             </div>
 
             {/* Actions list */}
+            {characterId === "lotso" && (
+              <>
+                <button
+                  onClick={onLotsoFlip}
+                  disabled={!viewingSelf || !isMyTurn}
+                  title={
+                    !viewingSelf ? "View your own board to use actions"
+                    : !isMyTurn ? "Your turn required"
+                    : "Flip Buzz ↔ Demo Mode Buzz at the same location"
+                  }
+                  style={btnStyle(viewingSelf && isMyTurn)}
+                >
+                  Flip Buzz
+                </button>
+                <button
+                  onClick={() => { if (!myId) return; setOpen(false); onFindHero(myId); }}
+                  disabled={!viewingSelf || !isMyTurn}
+                  title={!viewingSelf ? "View your own board" : (!isMyTurn ? "Your turn required" : "Reveal cards from a target until a Hero is found")}
+                  style={btnStyle(viewingSelf && isMyTurn)}
+                >
+                  Find Hero
+                </button>
+              </>
+            )}
+
             {characterId === "lady" && (
               <>
                 <button
@@ -3073,19 +3172,30 @@ function PlayerPanel({
                 </button>
               </>
             )}
+
             {characterId === "captain" && (
-              <button
-                onClick={onHookPeek}
-                disabled={!viewingSelf || !isMyTurn}
-                title={
-                  !viewingSelf ? "View your own board to use actions"
-                  : !isMyTurn ? "Your turn required"
-                  : "Look at the top 2 cards of your Fate deck and reorder them"
-                }
-                style={btnStyle(viewingSelf && isMyTurn)}
-              >
-                Give Them a Scare
-              </button>
+              <>
+                <button
+                  onClick={onHookPeek}
+                  disabled={!viewingSelf || !isMyTurn}
+                  title={
+                    !viewingSelf ? "View your own board to use actions"
+                    : !isMyTurn ? "Your turn required"
+                    : "Look at the top 2 cards of your Fate deck and reorder them"
+                  }
+                  style={btnStyle(viewingSelf && isMyTurn)}
+                >
+                  Give Them a Scare
+                </button>
+                <button
+                  onClick={() => { if (!myId) return; setOpen(false); onFindHero(myId); }}
+                  disabled={!viewingSelf || !isMyTurn}
+                  title={!viewingSelf ? "View your own board" : (!isMyTurn ? "Your turn required" : "Reveal cards from a target until a Hero is found")}
+                  style={btnStyle(viewingSelf && isMyTurn)}
+                >
+                  Find Hero…
+                </button>
+              </>
             )}
 
             {characterId === "maleficent" && (
