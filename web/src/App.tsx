@@ -905,6 +905,7 @@ export default function App() {
       ? (catById?.[focusCharacterId]?.name ?? focusCharacterId)
       : "—";
   const showPublicHand = !!focusPlayer?.handPublic && Array.isArray(focusPlayer?.publicHand);
+ 
 
 
  
@@ -1606,13 +1607,14 @@ export default function App() {
                     ) : (
                       // SPECTATING: render concealed tiles equal to their hand count
                       <>
-                      { showPublicHand ? (
-                        focusPlayer!.publicHand!.length === 0 ? (
+                      
+                      {showPublicHand ? (
+                        (focusPlayer!.publicHand?.length ?? 0) === 0 ? (
                           <span style={{ opacity: 0.7, fontSize: 12 }}>
                             {focusPlayer!.name}'s hand is empty
                           </span>
                         ) : (
-                          focusPlayer!.publicHand!.map(c => (
+                          focusPlayer!.publicHand!.map((c) => (
                             <div key={c.id} style={{ border: "1px solid #475569", borderRadius: 8 }}>
                               <CardFace
                                 card={c}
@@ -1625,26 +1627,44 @@ export default function App() {
                           ))
                         )
                       ) : (
-                        // fallback: concealed tiles (what you already had)
-                        Array.from({ length: focusPlayer.counts.hand }).map((_, idx) => (
-                          <div
-                            key={idx}
-                            title="Hidden card"
-                            style={{
-                              minWidth: 90, height: 130,
-                              padding: 8,
-                              border: "1px solid #475569",
-                              borderRadius: 8,
-                              background:
-                                "repeating-linear-gradient(135deg, #626886ff, #061027ff 10px, #0e1b36ff 10px, #02050cff 20px)",
-                              color: "#94a3b8",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              textAlign: "center", fontSize: 12,
-                              userSelect: "none",
-                            }}
-                          >
-                          </div>
-                        ))
+                        // Hidden hand → use character-specific back image
+                        (() => {
+                          const charKey = (focusPlayer?.characterId ?? "default").toString();
+                          const backSrc = `/character/${encodeURIComponent(charKey)}Back.jpg`;
+                          const fallbackSrc = `/character/defaultBack.jpg`;
+                          const handCount = focusPlayer?.counts?.hand ?? 0;
+
+                          return Array.from({ length: handCount }).map((_, idx) => (
+                            <div
+                              key={idx}
+                              title="Hidden card"
+                              style={{
+                                minWidth: 90,
+                                height: 130,
+                                overflow: "hidden",
+                                background: "#0b1220",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                userSelect: "none",
+                              }}
+                            >
+                              <img
+                                src={backSrc}
+                                onError={(e) => { (e.currentTarget as HTMLImageElement).src = fallbackSrc; }}
+                                alt={`${charKey} card back`}
+                                draggable={false}
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  objectFit: "cover",
+                                  display: "block",
+                                  pointerEvents: "none",
+                                }}
+                              />
+                            </div>
+                          ));
+                        })()
                       )}
                       </>
                     )}
@@ -2999,11 +3019,19 @@ function PlayerPanel({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const caretRef = useRef<HTMLButtonElement | null>(null);
   const [placeRight, setPlaceRight] = useState(true);
+  const charKey =
+    (characterId && characterId.trim()) ||
+    (characterName || "").toLowerCase().replace(/\s+/g, "") ||
+    "default";
+  const profSrc = `/character/${encodeURIComponent(charKey)}Prof.jpg`;
+  const [imgOk, setImgOk] = useState(true);
+  const zoom = 1.5;
+  const offsetX = 0;
+  const offsetY = 0;
   useLayoutEffect(() => {
     if (!open || !menuRef.current) return;
     const r = menuRef.current.getBoundingClientRect();
     const spaceRight = window.innerWidth - r.right;
-    // need about ~220px; adjust if your menu is wider
     setPlaceRight(spaceRight >= 220);
   }, [open]);
   useEffect(() => {
@@ -3056,9 +3084,28 @@ function PlayerPanel({
             fontWeight: 700,
             fontSize: 18,
             userSelect: "none",
+            overflow: "hidden",
           }}
         >
-          {initials}
+          {imgOk ? (
+            <img
+              src={profSrc}
+              alt={`${characterName || charKey} avatar`}
+              draggable={false}
+              onError={() => setImgOk(false)}       // fall back to initials if missing
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
+                pointerEvents: "none",
+                transform: `scale(${zoom}) translate(${offsetX/zoom}px, ${offsetY/zoom}px)`,
+                transformOrigin: "center",
+              }}
+            />
+          ) : (
+            initials
+          )}
         </div>
 
         {/* Caret/menu trigger (disabled if not viewing self) */}
