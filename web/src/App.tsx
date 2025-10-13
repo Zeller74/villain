@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useLayoutEffect } from 'react';
 import {makeSocket} from "./socket";
 
 
-type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number; fateDeck?: number; fateDiscard?: number}; discardTop: Card | null; board: Board; power?: number; publicHand?: Card[] | null; handPublic?: boolean;};
+type Player = {id: string; name: string; ready: boolean; characterId: string | null; counts: {deck: number; hand: number; discard: number; fateDeck?: number; fateDiscard?: number}; discardTop: Card | null; board: Board; power?: number; trust?: number; publicHand?: Card[] | null; handPublic?: boolean;};
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type RoomState = {roomId: string; ownerId: string; players: Player[]; game: GameMeta};
 type WelcomeMsg = {id: string; ts: number};
@@ -123,6 +123,24 @@ Ball Gown Cinderella cannot be Trapped by any card, although she can still be mo
 
 Glass Slippers: Unlike other Items in the Fate card deck, Glass Slippers do not attach to a Hero. You cannot win the game while a Glass Slipper is in your Realm. You can remove a Glass Slipper by Activating Lady Tremaine's Cane. Note: The Prince card is a Prince, not a Hero. The Prince is not affected by cards targeting Heroes.
 `,
+  },
+  mother: {
+    title: "Mother Gothel - Villain Guide",
+    image: "/guides/mother.jpg",
+    body: `Mother Gothel's Objective: Start your turn with at least 10 Trust.
+    
+Special Setup: Place the Rapunzel Tile at Rapunzel's Tower.
+
+Trust: Mother Gothel wants to keep Rapunzel close, so she needs Rapunzel to trust her.
+
+Rapunzel: Rapunzel is a unique Hero because she is already in your Realm at the start of the game, and she is never discarded. Like other Heroes, she blocks actions at her location and may be defeated by using a Vanquish action. Hoever, when Rapunzel is defeated, instead of discarding her, move her to Rapunzel's Tower.
+Important: At the end of Mother Gothel's turn, move Rapunzel one location toward Corona. If you cannot move Rapunzel because she is already at Corona, Mother Gothel loses 1 Trust.
+
+Controlling Rapunzel: Mother Gothel is able to gain Trust easily when Rapunzel is at Rapunzel's Tower, and keeping her away from Corona is important. Mother Gothel has several ways she controls Rapunzel's location. Mother Knows Best prevents Rapunzel from moving toward Corona at the end of that turn. Patchy Stabbington and Sideburns Stabbington move Rapunzel to Rapunzel's Tower and are powerful Allies that can be used to defeat Heroes. Now I'm The Bad Guy moves Rapunzel to Rapunzel's Tower. Mother Gothel loses 1 Trust, but it might be helpful in combination with other actions. 
+
+Gaining Trust: There are several cards that can gain Trust. When Hair Brush is played or moved to Rapunzel's location, gain 1 Trust. This item is good to play early as it can keep gaining Trust when it is in your Realm. I Love You Most gains 1 Trust if Mother Gothel is at Rapunzel's location. It is most effective when played at Rapunzel's Tower to gain an additional Trust. Let Down Your Hair can gain you Trust or move Rapunzel to help keep her away from Corona. Misdirection gains 1 Trust but moves Rapunzel toward Corona, so it should be used strategically to avoid losing Trust later. Crown can be used as a way to gain Power each time a Hero is defeated at that location. You can instead choose to discard Crown to gain 1 Trust. Revenge allows you to perform a Vanquish action and gain 1 Trust if a Hero other than Rapunzel is defeated.
+
+Strategy Tips: Some cards are most effective if played when Rapunzel is at Rapunzel's Tower. Sincer Rapunzel will move toward Corona at the end of your turn, moving her to Rapunzel's Tower or keeping her there will allow you to gain more Trust from those cards. Playing Effect or Condition cards and using Allies to defeat Rapunzel can move her to Rapunzel's Tower.`,
   },
 };
 
@@ -1406,6 +1424,13 @@ export default function App() {
               handPublic={!!focusPlayer?.handPublic}
               onTremaineSift={startTremaineSift}
               onTremainePlan={onTremainePlan}
+              trust={focusPlayer?.trust ?? 0}
+              onChangeTrust={(delta) => {
+                if (!myId) return;
+                sockRef.current!.emit("trust:change", { delta }, (res:{ok:boolean; error?:string})=>{
+                  if(!res?.ok) setLastError(res?.error || "Trust change failed");
+                });
+              }}
             />
             {/*Right hand content */}
             <div
@@ -2872,6 +2897,8 @@ function PlayerPanel({
   handPublic,
   onTremaineSift,
   onTremainePlan,
+  trust,
+  onChangeTrust,
 }: {
   viewingSelf: boolean;
   characterName: string;
@@ -2882,6 +2909,8 @@ function PlayerPanel({
   handPublic: boolean;
   onTremaineSift: () => void;
   onTremainePlan: () => void;
+  trust?: number;
+  onChangeTrust?: (delta: number) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -3093,6 +3122,27 @@ function PlayerPanel({
       >
         {characterName || "—"}
       </div>
+
+      {/*gothel trust */}
+      {characterId === "mother" && (
+        <div
+          style={{
+            width: "100%", border:"1px solid #334155", borderRadius:8, padding:"6px 6px",
+            background:"#0b1220", color:"#e5e7eb", display:"flex", flexDirection:"column", gap:6,
+          }}
+          title="Trust"
+        >
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+            <strong style={{ fontSize:16 }}>Trust: {typeof trust === "number" ? trust : 0}</strong>
+          </div>
+          {viewingSelf && isMyTurn && onChangeTrust && (
+            <div style={{ display:"flex", justifyContent:"center", gap:6 }}>
+              <button style={{width: 30, height: 30, padding: 0, fontSize:15}} onClick={()=>onChangeTrust(-1)}>-1</button>
+              <button style={{width: 30, height: 30, padding: 0, fontSize:15}} onClick={()=>onChangeTrust(+1)}>+1</button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

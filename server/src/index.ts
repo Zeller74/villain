@@ -6,11 +6,11 @@ type Board = {moverAt: 0 | 1 | 2 | 3; locations: [Location, Location, Location, 
 type Card = {id: string; type: CardType; label: string; faceUp: boolean; locked?: boolean; desc?: string; cost: number; baseStrength?: number | null; strength?: number;};
 type CardType = "Ally" | "Item" | "Condition" | "Effect" | "Hero" | "Cheat" | "Guardian" | "Curse" | "Ingredient" | "Maui" | "Omnidroid" | "Prince" | "Prisoner" | "Relic" | "Remote" | "Titan"
 type Zones = {deck: Card[]; hand: Card[]; discard: Card[]; fateDeck: Card[]; fateDiscard: Card[]};
-type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number; won?: boolean; handPublic?: boolean};
+type Player = {id: string; name: string, ready: boolean; characterId: string | null; zones: Zones; board: Board; power: number; trust: number; won?: boolean; handPublic?: boolean};
 type ChatMsg = {id: string; ts: number; playerId: string; name: string; text: string;}
 type GameMeta = {phase: "lobby" | "playing" | "ended"; turn: number; activePlayerId: string | null};
 type Room = {id: string; ownerId: string; players: Player[]; game: GameMeta; messages: ChatMsg[]; log: ActionEntry[]; fate?: FateSession; fatePeek?: FatePeekSession; fateSift?: FateSiftSession};
-type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek" | "fate_return" | "reveal_hand" | "fate_sift";
+type ActionType = "draw" | "play" | "discard" | "undo" | "move" | "remove" | "reshuffle" | "retrieve" | "power" | "pawn" | "lock" | "strength" | "fate_reshuffle" | "fate_play" | "move_top" | "fate_discard_top" | "fate_discard_both" | "play_effect" | "fate_peek" | "fate_return" | "reveal_hand" | "fate_sift" | "trust";
 type ActionEntry = {
   id: string;
   ts: number;
@@ -39,7 +39,8 @@ type ActionEntry = {
     | { type: "fate_peek"; targetId: string; count: number}
     | { type: "fate_return"; targetId: string; cardId: string}
     | { type: "reveal_hand"; prev: boolean; next: boolean }
-    | { type: "fate_sift"; targetId: string; keptCardId?: string | undefined; discardedCardId: string};
+    | { type: "fate_sift"; targetId: string; keptCardId?: string | undefined; discardedCardId: string}
+    | { type: "trust"; delta: number; prev: number; next: number };
 
   undone?: boolean;
 };
@@ -239,6 +240,49 @@ const CHARACTERS_DATA: readonly [
       
     ],
   },
+  {
+    id: "mother",
+    name: "Mother Gothel",
+    locations: [
+      { name: "Rapunzel's Tower", actions: ["moveItemAlly", "fate", "play", "vanquish"], topSlots: 2 },
+      { name: "The Snuggly Duckling", actions: ["play", "gain3", "play", "discard"], topSlots: 1 },
+      { name: "The Forest", actions: ["play", "gain2", "play", "moveItemAlly"], topSlots: 1 },
+      { name: "Corona", actions: ["gain1", "discard", "play", "fate"], topSlots: 2 },
+    ],
+    deck: [
+      { label: "Royal Guard", type: "Ally", description: "When Royal Guard is moved, you may move a Hero from Royal Guard's previous location to his new location.", cost: 1, strength: 2, copies: 5},
+      { label: "Duplicity", type: "Condition", description: "During their turn, if another player defeats a Hero with a Strength of 3 or more, you may play Duplicity. Defeat a Hero with a Strength of 3 or less.", cost: null, strength: null, copies: 2},
+      { label: "Egomania", type: "Condition", description: "During their turn, if another player moves an Ally or Item, you may play Egomania. Move Rapunzel to Rapunzel's Tower.", cost: null, strength: null, copies: 2},
+      { label: "I Love You Most", type: "Effect", description: "If Mother Gothel and Rapunzel are at the same location, gain 1 Trust. If Mother Gothel and Rapunzel are at Rapunzel's Tower, gain 1 additional Trust.", cost: 1, strength: null, copies: 2},
+      { label: "Let Down Your Hair", type: "Effect", description: "If Rapunzel is at Rapunzel's Tower, gain 1 Trust. Otherwise, move Rapunzel up to two locations toward Rapunzel's Tower.", cost: 1, strength: null, copies: 2},
+      { label: "Misdirection", type: "Effect", description: "Move Rapunzel one location toward Corona and gain 1 Trust.", cost: 1, strength: null, copies: 2},
+      { label: "Mother Knows Best", type: "Effect", description: "At the end of this turn, do not move Rapunzel", cost: 1, strength: null, copies: 2},
+      { label: "Now I'm the Bad Guy", type: "Effect", description: "Move Rapunzel to Rapunzel's Tower and lose 1 Trust.", cost: 0, strength: null, copies: 2},
+      { label: "Revenge", type: "Effect", description: "Perform a Vanquish action. If you defeat a Hero other than Rapunzel, gain 1 Trust.", cost: 1, strength: null, copies: 2},
+      { label: "Royal Rider", type: "Ally", description: "When performing a Vanquish action, Royal Rider may be used to defeat a Hero at his location or at an adjacent location.", cost: 2, strength: 3, copies: 2},
+      { label: "What Once Was Mine", type: "Effect", description: "Choose a card from your discard pile and put it into your hand.", cost: 1, strength: null, copies: 2},
+      { label: "Crown", type: "Item", description: "When a Hero is defeated at this location, either gain 2 Power or discard Crown to gain 1 Trust.", cost: 1, strength: null, copies: 1},
+      { label: "Hair Brush", type: "Item", description: "When Hair Brush is played or moved to Rapunzel's location, gain 1 Trust.", cost: 1, strength: null, copies: 1},
+      { label: "Knife", type: "Item", description: "When Knife is played, attach it to an Ally. That Ally gets +2 Strength. When that Ally is used to defeat Rapunzel, gain 1 Trust.", cost: 1, strength: 2, copies: 1},
+      { label: "Patchy Stabbington", type: "Ally", description: "When Patchy Stabbington is played to Rapunzel's location, you may move Rapunzel to Rapunzel's Tower.", cost: 3, strength: 5, copies: 1},
+      { label: "Sideburns Stabbington", type: "Ally", description: "When Sideburns Stabbington is played to Rapunzel's location, you may move Rapunzel to Rapunzel's Tower.", cost: 3, strength: 5, copies: 1},
+      
+    ],
+    fateDeck: [
+      { label: "Everyone Has a Dream", type: "Effect", description: "Mother Gothel loses 1 Trust", cost: null, strength: null, copies: 3},
+      { label: "Aging", type: "Effect", description: "Discard an Ally or Item with a Cost of 2 or less from Mother Gothel's Realm.", cost: null, strength: null, copies: 2},
+      { label: "Floating Lights", type: "Effect", description: "Move Rapunzel to Corona", cost: null, strength: null, copies: 2},
+      { label: "Flynn Rider", type: "Hero", description: "When Flynn Rider is played, Mother Gothel loses 2 Trust. When Flynn Rider is defeated, Mother Gothel gains 2 Trust.", cost: null, strength: 4, copies: 1},
+      { label: "Frying Pan", type: "Item", description: "When Frying Pan is played, attach it to a Hero. That Hero gets +1 Strength.", cost: null, strength: 1, copies: 1},
+      { label: "Hook Hand", type: "Hero", description: "When Hook Hand is played, Mother Gothel discards a random card from her hand.", cost: null, strength: 2, copies: 1},
+      { label: "Maximus", type: "Hero", description: "When Maximus is played, you may move a Royal Rider at his location to any other location.", cost: null, strength: 3, copies: 1},
+      { label: "Pascal", type: "Hero", description: "When Rapunzel moves to Pascal's location, move her one location toward Corona.", cost: null, strength: 2, copies: 1},
+      { label: "Queen and King", type: "Hero", description: "If Queen and King are played to Rapunzel's location, Mother Gothel loses 1 Trust.", cost: null, strength: 4, copies: 1},
+      { label: "Rapunzel", type: "Hero", description: "At the end of Mother Gothel's turn, move Rapunzel one location toward Corona. If Rapunzel is already at Corona, Mother Gothel loses 1 Trust. When Rapunzel is defeated, move her to Rapunzel's Tower.", cost: null, strength: 4, copies: 1},
+      { label: "Shorty", type: "Hero", description: "If Shorty is played to Mother Gothel's location, you may move Mother Gothel to any location.", cost: null, strength: 2, copies: 1},
+      { label: "Ulf", type: "Hero", description: "Allies may not be moved from Ulf's location.", cost: null, strength: 2, copies: 1},
+    ],
+  },
 ];
 
 type CharacterId = (typeof CHARACTERS_DATA)[number]["id"];
@@ -294,6 +338,7 @@ function emitRoomState(io: Server, roomId: string) {
       characterId: (p.characterId as CharacterId) || DEFAULT_CHARACTER_ID,
       won: !!(p as any).won,
       power: p.power,
+      trust: p.trust,
       counts: {
         deck: deck.length,
         hand: hand.length,
@@ -431,6 +476,25 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} undid their last action`,
     };
   }
+  if (e.type === "trust" && e.data.type === "trust") {
+    const d = e.data as Extract<ActionEntry["data"], { type: "trust" }>;
+    const sign = d.delta > 0 ? "+" : "";
+    const detail =
+      d.delta === 0
+        ? `Trust unchanged (${d.next})`
+        : `Trust ${sign}${d.delta} (${d.prev} → ${d.next})`;
+
+    return {
+      id: e.id,
+      ts: e.ts,
+      actorId: e.actorId,
+      actorName: name,
+      type: "trust",
+      text: `${name} ${detail}`,
+    };
+  }
+
+
   if (e.type === "fate_sift" && e.data.type === "fate_sift") {
     const d = e.data as Extract<ActionEntry["data"], { type: "fate_sift" }>;
     const actor = room.players.find(p => p.id === e.actorId);
@@ -441,7 +505,6 @@ function buildLogItem(room: Room, e: ActionEntry): LogItem {
       text: `${name} sifted fate for ${target}: discarded ${d.discardedCardId.slice(0,6)}${d.keptCardId ? `, kept ${d.keptCardId.slice(0,6)} on top` : ""}`,
     };
   }
-
 
   if (e.type === "draw" && e.data.type === "draw") {
     const n = e.data.cardIds.length;
@@ -768,6 +831,39 @@ function getCharacter(id: string | null | undefined): CharacterTemplate {
 
 function nowId() { return nanoid(8); }
 
+function placeFromFateTop(player: Player, matcher: (c: Card)=>boolean, locIndex: 0|1|2|3 = 0) {
+  // Try to find in fateDeck
+  let idx = player.zones.fateDeck.findIndex(matcher);
+  let card: Card | undefined;
+  if (idx >= 0) {
+    card = player.zones.fateDeck.splice(idx, 1)[0];
+  }
+  //Fallback: try fateDiscard
+  if (!card) {
+    idx = player.zones.fateDiscard.findIndex(matcher);
+    if (idx >= 0) card = player.zones.fateDiscard.splice(idx, 1)[0];
+  }
+  // Last resort: ignore (or create from template if you prefer)
+  if (!card) return false;
+
+  const loc = player.board.locations[locIndex];
+  if (!loc) return false;
+  loc.top.push(card);
+  return true;
+}
+
+function applyCharacterSetup(player: Player) {
+  switch (player.characterId) {
+    case "mother": {
+      placeFromFateTop(player, c => /rapunzel/i.test(c.label), 0);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+
 
 
 io.on("connection", (socket) => {
@@ -797,7 +893,7 @@ io.on("connection", (socket) => {
         rooms.set(roomId, room);
 
         //join as player
-        const player: Player = { id: socket.id, name, ready: false, characterId: DEFAULT_CHARACTER_ID, zones: {deck: [], hand:[], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0, handPublic: false, };
+        const player: Player = { id: socket.id, name, ready: false, characterId: DEFAULT_CHARACTER_ID, zones: {deck: [], hand:[], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0, trust: 0, handPublic: false, };
         room.players.push(player);
         socket.join(roomId);
         socket.data.roomId = roomId;
@@ -823,7 +919,7 @@ io.on("connection", (socket) => {
         }
         //avoid dupes
         if (!room.players.some(p => p.id === socket.id)) {
-            room.players.push({id: socket.id, name, ready: false, characterId: DEFAULT_CHARACTER_ID, zones: {deck: [], hand: [], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0, handPublic: false,});
+            room.players.push({id: socket.id, name, ready: false, characterId: DEFAULT_CHARACTER_ID, zones: {deck: [], hand: [], discard: [], fateDeck: [], fateDiscard: []}, board: makeEmptyBoard(), power: 0, trust: 0, handPublic: false,});
             if (!room.game.activePlayerId && room.players.length > 0) {
                 const first = room.players[0]
                 if (first) room.game.activePlayerId = first.id;
@@ -934,6 +1030,7 @@ io.on("connection", (socket) => {
           p.zones.hand = [];
           shuffle(p.zones.deck);
           shuffle(p.zones.fateDeck);
+          applyCharacterSetup(p);
         }
 
         //transition to playing
@@ -2230,6 +2327,27 @@ io.on("connection", (socket) => {
       delete room.fateSift;
       emitRoomState(io, roomId);
       ack?.({ ok: true });
+    });
+    socket.on("trust:change", (payload: { delta: number }, ack) => {
+      const room = rooms.get(socket.data.roomId!);
+      if (!room) return ack?.({ ok:false, error:"room not found" });
+      if (room.game.phase !== "playing") return ack?.({ ok:false, error:"not playing" });
+      if (room.game.activePlayerId !== socket.id) return ack?.({ ok:false, error:"not your turn" });
+
+      const me = room.players.find(p=>p.id===socket.id);
+      if (!me) return ack?.({ ok:false, error:"player not found" });
+
+      const prev = me.trust;
+      const next = Math.max(0, Math.min(50, prev + Number(payload?.delta||0)));
+      me.trust = next;
+
+      pushLog(io, room.id, {
+        id: nowId(), ts: Date.now(), actorId: socket.id, type: "trust",
+        data: { type: "trust", delta: next - prev, prev, next }
+      });
+
+      emitRoomState(io, room.id);
+      ack?.({ ok:true });
     });
 
 
