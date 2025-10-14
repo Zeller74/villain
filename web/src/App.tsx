@@ -200,7 +200,7 @@ export default function App() {
   const [catalog, setCatalog] = useState<CharacterPreview[]>([]);
   const [pendingCharId, setPendingCharId] = useState<string>("");
   const [fatePeekOpen, setFatePeekOpen] = useState(false);
-  const [fatePeekTargetId, setFatePeekTargetId] = useState<string | null>(null);
+  const [, setFatePeekTargetId] = useState<string | null>(null);
   const [fatePeekTargetName, setFatePeekTargetName] = useState<string>("");
   const [fatePeekCards, setFatePeekCards] = useState<Card[]>([]);
   const [fatePeekOriginal, setFatePeekOriginal] = useState<Card[]>([]);
@@ -680,22 +680,6 @@ export default function App() {
     [catalog]
   );
 
-  const startFatePeek = (targetId: string, count: number) => {
-    const s = sockRef.current!;
-    s.emit(
-      "fatePeek:start",
-      { targetId, count },
-      (res: { ok: boolean; error?: string; cards?: Card[]; targetName?: string }) => {
-        if (!res?.ok) return setLastError(res?.error || "Peek failed");
-        setFatePeekTargetId(targetId);
-        setFatePeekTargetName(res.targetName || "Player");
-        setFatePeekOriginal(res.cards || []);
-        setFatePeekCards(res.cards || []);
-        setFatePeekOpen(true);
-      }
-    );
-  };
-
   const confirmFatePeek = () => {
     const s = sockRef.current!;
     s.emit(
@@ -781,20 +765,6 @@ export default function App() {
         setSiftCards(res.cards || []);
         setSiftTargetName(res.targetName || "Player");
         setSiftOpen(true);
-      }
-    );
-  };
-
-  const chooseTremaineSift = (keepId?: string) => {
-    const s = sockRef.current!;
-    s.emit(
-      "fateSift:choose",
-      { keepId },
-      (res: { ok: boolean; error?: string }) => {
-        if (!res?.ok) return setLastError(res?.error || "Choose failed");
-        setSiftOpen(false);
-        setSiftCards([]);
-        setSiftTargetName("");
       }
     );
   };
@@ -1994,7 +1964,7 @@ function DiscardModal({
           {cards.length === 0 ? (
             <div style={{ opacity: 0.7 }}>Empty</div>
           ) : (
-            cards.map((c, idx) => (
+            cards.map((c) => (
               <div key={c.id}
                 onClick={() => { if (canTake && onTakeCard) onTakeCard(c);}}
                 style={{ cursor: "pointer" }}>
