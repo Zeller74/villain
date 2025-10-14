@@ -74,8 +74,12 @@ type CharacterPreview = {
 
 
 const PORT = Number(process.env.PORT ?? 3001);
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",")
+  : ["http://localhost:5173"];
+
 const io = new Server(PORT, {
-    cors: {origin: "http://localhost:5173", credentials: true}
+  cors: { origin: corsOrigins, credentials: true },
 });
 const rooms = new Map<string, Room>();
 const MAX_POWER = 50;
