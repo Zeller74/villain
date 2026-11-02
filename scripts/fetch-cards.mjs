@@ -1,9 +1,10 @@
-// Downloads the printed card images from the Villainous wiki into web/public/cards.
+// Downloads the printed card images and villain boards from the Villainous wiki into
+// web/public/cards and web/public/boards.
 //
 //   node scripts/fetch-cards.mjs           download anything missing
 //   node scripts/fetch-cards.mjs --check   report what matches, download nothing
 //
-// The images are committed, so this only needs running after a card is added to the data.
+// The images are committed, so this only needs running after a card or villain is added.
 // The game shows its parchment cards for any card without an image.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -12,11 +13,25 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DATA = join(ROOT, "server/src/data/characters");
 const OUT = join(ROOT, "web/public/cards");
-const API = "https://disney-villainous.fandom.com/api.php";
+const BOARD_OUT = join(ROOT, "web/public/boards");
+const API ="https://disney-villainous.fandom.com/api.php";
 const HEADERS = {"User-Agent": "villain-card-fetch (personal fan project)"};
 //the game shows the small set; the zoom view loads a large image only when a card is opened
 const SIZES = [{dir: "", width: 480}, {dir: "large", width: 1000}];
+const BOARD_WIDTH = 2400;
 const PAUSE_MS = 250;
+
+//one scan per villain, which game.css crops each location's tile out of. These are the
+//original printings: a newer "I2E" scan can differ, like Hook's Lost Boys' Hideout
+const BOARDS = {
+  captain: "Hookrealm.jpg",
+  lady: "LadyTremainerealm.jpg",
+  lotso: "Lotsorealm.jpg",
+  maleficent: "Maleficentrealm.jpg",
+  mother: "MotherGothelrealm.jpg",
+  pete: "Peterealm.jpg",
+  prince: "Princejohnrealm.jpg",
+};
 
 //where the wiki's card page has the wrong picture: an animation cycling through a card's
 //printed versions, or a photo of a card when a clean scan exists
@@ -125,6 +140,21 @@ async function readCardPages(titles) {
   return pages;
 }
 
+//returns how many images it saved, for the summary
+async function save(image, width, file, name) {
+  if (existsSync(file)) return 0;
+  const url = image.url.replace("/revision/latest", `/revision/latest/scale-to-width-down/${width}`);
+  const res = await fetch(url, {headers: HEADERS});
+  if (!res.ok) {
+    console.log(`failed: ${name} at ${width} (${res.status})`);
+    return 0;
+  }
+  mkdirSync(dirname(file), {recursive: true});
+  writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+  await sleep(PAUSE_MS);
+  return 1;
+}
+
 function fieldDiffers(card, page) {
   const diffs = [];
   const compare = (name, ours, theirs) => {
@@ -176,26 +206,22 @@ async function main() {
   console.log(`matched ${matched.length} of ${cards.length} cards to a wiki page for the right villain`);
   if (unmatched.length) console.log(`\nno match:\n  ${unmatched.join("\n  ")}`);
   if (differences.length) console.log(`\ndiffers from the wiki:\n  ${differences.join("\n  ")}`);
+
+  const boards = Object.entries(BOARDS).map(([villain, name]) => ({villain, name, image: findImage(name)}));
+  const noBoard = boards.filter(b => !b.image).map(b => b.name);
+  if (noBoard.length) console.log(`\nno board image:\n  ${noBoard.join("\n  ")}`);
   if (checkOnly) return;
 
   let saved = 0;
   for (const {card, image} of matched) {
     for (const {dir, width} of SIZES) {
-      const file = join(OUT, dir, `${artKey(card)}.webp`);
-      if (existsSync(file)) continue;
-      const url = image.url.replace("/revision/latest", `/revision/latest/scale-to-width-down/${width}`);
-      const res = await fetch(url, {headers: HEADERS});
-      if (!res.ok) {
-        console.log(`failed: ${card.label} at ${width} (${res.status})`);
-        continue;
-      }
-      mkdirSync(dirname(file), {recursive: true});
-      writeFileSync(file, Buffer.from(await res.arrayBuffer()));
-      saved++;
-      await sleep(PAUSE_MS);
+      saved += await save(image, width, join(OUT, dir, `${artKey(card)}.webp`), card.label);
     }
   }
-  console.log(`\nsaved ${saved} new images to web/public/cards`);
+  for (const {villain, image} of boards.filter(b => b.image)) {
+    saved += await save(image, BOARD_WIDTH, join(BOARD_OUT, `${villain}.webp`), `${villain}'s board`);
+  }
+  console.log(`\nsaved ${saved} new images to web/public`);
 }
 
 main().catch((err) => {

@@ -41,10 +41,10 @@
   --cloth: #3a3128;
 }
 
-[data-villain="captain"] { --cloth: #6e2a36; }
-[data-villain="prince"] { --cloth: #7a4318; }
-[data-villain="lady"] { --cloth: #46555f; }
-[data-villain="mother"] { --cloth: #6f4f33; }
-[data-villain="maleficent"] { --cloth: #35502f; }
-[data-villain="lotso"] { --cloth: #8a2f6b; }
-[data-villain="pete"] { --cloth: #34506e; }
+[data-villain="captain"] { --cloth: #6e2a36; --board: url("/boards/captain.webp"); }
+[data-villain="prince"] { --cloth: #7a4318; --board: url("/boards/prince.webp"); }
+[data-villain="lady"] { --cloth: #46555f; --board: url("/boards/lady.webp"); }
+[data-villain="mother"] { --cloth: #6f4f33; --board: url("/boards/mother.webp"); }
+[data-villain="maleficent"] { --cloth: #35502f; --board: url("/boards/maleficent.webp"); }
+[data-villain="lotso"] { --cloth: #8a2f6b; --board: url("/boards/lotso.webp"); }
+[data-villain="pete"] { --cloth: #34506e; --board: url("/boards/pete.webp"); }

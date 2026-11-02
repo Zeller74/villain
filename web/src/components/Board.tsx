@@ -80,7 +80,7 @@ export function Board(props: BoardProps) {
               onClick={() => props.onTopZone(i)}
               title={placingFate ? "Click to place fate card here (Top)" : undefined}
             >
-              {loc.top.length === 0 && <span className="zone__label label">Top</span>}
+              <div className="zone__art" />
               <div className="fan">
                 {loc.top.map((c) => (
                   <div key={c.id} className="slot">

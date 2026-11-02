@@ -310,6 +310,27 @@ describe("zooming a card", () => {
   });
 });
 
+describe("the printed board", () => {
+  it("puts a location's art behind its top zone, and leaves the bottom zone plain", () => {
+    enterGame(state());
+    expect(screen.getByTestId("top-2").querySelector(".zone__art")).not.toBeNull();
+    expect(screen.getByTestId("bottom-2").querySelector(".zone__art")).toBeNull();
+  });
+
+  it("shows the board of the villain being looked at", () => {
+    enterGame(state({characterId: "captain"}, {}, {characterId: "prince"}));
+    expect(document.querySelector(".game")?.getAttribute("data-villain")).toBe("captain");
+    fireEvent.click(screen.getByText("them"));
+    expect(document.querySelector(".game")?.getAttribute("data-villain")).toBe("prince");
+  });
+
+  it("still places a hero when the art is clicked", () => {
+    enterGame(state(), [], {kind: "fate", targetId: ME, targetName: ME, cards: [card("Wendy", {type: "Hero"})], chosenId: "Wendy"});
+    fireEvent.click(screen.getByTestId("top-2").querySelector(".zone__art")!);
+    expect(socket.sentOf("fate:placeSelected")[0]!.payload).toEqual({locationIndex: 2});
+  });
+});
+
 describe("the lobby", () => {
   it("opens the guide above every panel", () => {
     enterGame(state({}, {phase: "lobby", activePlayerId: null}));

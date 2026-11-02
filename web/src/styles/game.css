@@ -236,13 +236,14 @@
 }
 
 /* The four rows of a location are shared across the board, so action chips line up and
-   a row only takes the height its cards need. Spare height is split between the zones. */
+   a row only takes the height its cards need. Spare height goes mostly to the top zones,
+   which are about as tall as they are wide when the printed tile fills them. */
 .board {
   flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: auto minmax(min-content, 1fr) auto minmax(min-content, 1fr);
+  grid-template-rows: auto minmax(min-content, 1.25fr) auto minmax(min-content, 1fr);
   column-gap: 8px;
 }
 
@@ -328,6 +329,37 @@
   background: rgb(0 0 0 / 0.34);
   box-shadow: inset 0 1px 6px rgb(0 0 0 / 0.55);
   border: 1px solid transparent;
+}
+
+/* the location's tile from the printed board, under the cards. A scan holds all four tiles in
+   a strip, so this shows one part of it, filling the zone whatever shape the zone is */
+.zone__art {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  border-radius: inherit;
+  container-type: size;
+}
+
+.zone__art::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  width: max(100cqw, 100cqh * 1.023);
+  aspect-ratio: 1.023;
+  background: var(--board, none) var(--tile-x) 28.5% / 510% auto no-repeat;
+}
+
+.location:nth-child(1) { --tile-x: 21%; }
+.location:nth-child(2) { --tile-x: 46.9%; }
+.location:nth-child(3) { --tile-x: 72.8%; }
+.location:nth-child(4) { --tile-x: 98.6%; }
+
+.location.is-locked .zone__art {
+  filter: saturate(0.35) brightness(0.55);
 }
 
 .zone.is-target {
