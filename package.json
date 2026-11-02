@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm test -w server && npm test -w web",
+    "build": "npm run build -w server && npm run build -w web",
+    "lint": "npm run lint -w web"
   },
   "keywords": [],
   "author": "",

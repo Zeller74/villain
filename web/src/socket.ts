@@ -5,12 +5,12 @@ const API_URL =
   (import.meta.env.DEV ? "http://localhost:3001" : window.location.origin);
 
 export function makeSocket(): Socket {
+  //keeps retrying for as long as the tab is open, since a held seat can be reclaimed for minutes
   const socket = io(API_URL, {
     transports: ["websocket"],
     withCredentials: true,
     autoConnect: true,
     reconnection: true,
-    reconnectionAttempts: 10,
     timeout: 20000,
   });
 
