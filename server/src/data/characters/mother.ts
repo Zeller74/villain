@@ -1,0 +1,45 @@
+import type { CharacterTemplate } from "../../types";
+
+export const mother: CharacterTemplate = {
+  id: "mother",
+  name: "Mother Gothel",
+  locations: [
+    { name: "Rapunzel's Tower", actions: ["moveItemAlly", "fate", "play", "vanquish"], topSlots: 2 },
+    { name: "The Snuggly Duckling", actions: ["play", "gain3", "play", "discard"], topSlots: 1 },
+    { name: "The Forest", actions: ["play", "gain2", "play", "moveItemAlly"], topSlots: 1 },
+    { name: "Corona", actions: ["gain1", "discard", "play", "fate"], topSlots: 2 },
+  ],
+  deck: [
+    { label: "Royal Guard", type: "Ally", description: "When Royal Guard is moved, you may move a Hero from Royal Guard's previous location to his new location.", cost: 1, strength: 2, copies: 5},
+    { label: "Duplicity", type: "Condition", description: "During their turn, if another player defeats a Hero with a Strength of 3 or more, you may play Duplicity. Defeat a Hero with a Strength of 3 or less.", cost: null, strength: null, copies: 2},
+    { label: "Egomania", type: "Condition", description: "During their turn, if another player moves an Ally or Item, you may play Egomania. Move Rapunzel to Rapunzel's Tower.", cost: null, strength: null, copies: 2},
+    { label: "I Love You Most", type: "Effect", description: "If Mother Gothel and Rapunzel are at the same location, gain 1 Trust. If Mother Gothel and Rapunzel are at Rapunzel's Tower, gain 1 additional Trust.", cost: 1, strength: null, copies: 2},
+    { label: "Let Down Your Hair", type: "Effect", description: "If Rapunzel is at Rapunzel's Tower, gain 1 Trust. Otherwise, move Rapunzel up to two locations toward Rapunzel's Tower.", cost: 1, strength: null, copies: 2},
+    { label: "Misdirection", type: "Effect", description: "Move Rapunzel one location toward Corona and gain 1 Trust.", cost: 1, strength: null, copies: 2},
+    { label: "Mother Knows Best", type: "Effect", description: "At the end of this turn, do not move Rapunzel", cost: 1, strength: null, copies: 2},
+    { label: "Now I'm the Bad Guy", type: "Effect", description: "Move Rapunzel to Rapunzel's Tower and lose 1 Trust.", cost: 0, strength: null, copies: 2},
+    { label: "Revenge", type: "Effect", description: "Perform a Vanquish action. If you defeat a Hero other than Rapunzel, gain 1 Trust.", cost: 1, strength: null, copies: 2},
+    { label: "Royal Rider", type: "Ally", description: "When performing a Vanquish action, Royal Rider may be used to defeat a Hero at his location or at an adjacent location.", cost: 2, strength: 3, copies: 2},
+    { label: "What Once Was Mine", type: "Effect", description: "Choose a card from your discard pile and put it into your hand.", cost: 1, strength: null, copies: 2},
+    { label: "Crown", type: "Item", description: "When a Hero is defeated at this location, either gain 2 Power or discard Crown to gain 1 Trust.", cost: 1, strength: null, copies: 1},
+    { label: "Hair Brush", type: "Item", description: "When Hair Brush is played or moved to Rapunzel's location, gain 1 Trust.", cost: 1, strength: null, copies: 1},
+    { label: "Knife", type: "Item", description: "When Knife is played, attach it to an Ally. That Ally gets +2 Strength. When that Ally is used to defeat Rapunzel, gain 1 Trust.", cost: 1, strength: 2, copies: 1},
+    { label: "Patchy Stabbington", type: "Ally", description: "When Patchy Stabbington is played to Rapunzel's location, you may move Rapunzel to Rapunzel's Tower.", cost: 3, strength: 5, copies: 1},
+    { label: "Sideburns Stabbington", type: "Ally", description: "When Sideburns Stabbington is played to Rapunzel's location, you may move Rapunzel to Rapunzel's Tower.", cost: 3, strength: 5, copies: 1},
+    
+  ],
+  fateDeck: [
+    { label: "Everyone Has a Dream", type: "Effect", description: "Mother Gothel loses 1 Trust", cost: null, strength: null, copies: 3},
+    { label: "Aging", type: "Effect", description: "Discard an Ally or Item with a Cost of 2 or less from Mother Gothel's Realm.", cost: null, strength: null, copies: 2},
+    { label: "Floating Lights", type: "Effect", description: "Move Rapunzel to Corona", cost: null, strength: null, copies: 2},
+    { label: "Flynn Rider", type: "Hero", description: "When Flynn Rider is played, Mother Gothel loses 2 Trust. When Flynn Rider is defeated, Mother Gothel gains 2 Trust.", cost: null, strength: 4, copies: 1},
+    { label: "Frying Pan", type: "Item", description: "When Frying Pan is played, attach it to a Hero. That Hero gets +1 Strength.", cost: null, strength: 1, copies: 1},
+    { label: "Hook Hand", type: "Hero", description: "When Hook Hand is played, Mother Gothel discards a random card from her hand.", cost: null, strength: 2, copies: 1},
+    { label: "Maximus", type: "Hero", description: "When Maximus is played, you may move a Royal Rider at his location to any other location.", cost: null, strength: 3, copies: 1},
+    { label: "Pascal", type: "Hero", description: "When Rapunzel moves to Pascal's location, move her one location toward Corona.", cost: null, strength: 2, copies: 1},
+    { label: "Queen and King", type: "Hero", description: "If Queen and King are played to Rapunzel's location, Mother Gothel loses 1 Trust.", cost: null, strength: 4, copies: 1},
+    { label: "Rapunzel", type: "Hero", description: "At the end of Mother Gothel's turn, move Rapunzel one location toward Corona. If Rapunzel is already at Corona, Mother Gothel loses 1 Trust. When Rapunzel is defeated, move her to Rapunzel's Tower.", cost: null, strength: 4, copies: 1},
+    { label: "Shorty", type: "Hero", description: "If Shorty is played to Mother Gothel's location, you may move Mother Gothel to any location.", cost: null, strength: 2, copies: 1},
+    { label: "Ulf", type: "Hero", description: "Allies may not be moved from Ulf's location.", cost: null, strength: 2, copies: 1},
+  ],
+};

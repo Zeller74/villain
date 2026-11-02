@@ -1,0 +1,41 @@
+import type { CharacterTemplate } from "../../types";
+
+export const captain: CharacterTemplate = {
+  id: "captain",
+  name: "Captain Hook",
+  locations: [
+    { name: "Jolly Roger", actions: ["gain1", "discard", "vanquish", "play"], topSlots: 2 },
+    { name: "Skull Rock", actions: ["gain1", "play", "fate", "discard"], topSlots: 2 },
+    { name: "Mermaid Lagoon", actions: ["play", "moveItemAlly", "gain3", "play"], topSlots: 2 },
+    { name: "Hangman's Tree", actions: ["fate", "gain2", "moveHero", "play"], topSlots: 2 },
+  ],
+  deck: [
+    { label: "Boarding Party", type: "Ally", description: "When performing a Vanquish action, Boarding Party may be used to defeat a Hero at their location or at an adjacent unlocked location.", cost: 2, strength: 2, copies: 3 },
+    { label: "Give Them a Scare", type: "Effect", description: "Look at the top two cards of your Fate deck. Either discard both cards or return them to the top in any order.", cost: 1, strength: null, copies: 3},
+    { label: "Swashbuckler", type: "Ally", description: "No additional Ability.", cost: 1, strength: 2, copies: 3},
+    { label: "Worthy Opponent", type: "Effect", description: "Gain 2 Power. Reveal cards from the top of your Fate deck until you reveal a Hero. Play that Hero and discard the rest.", cost: 0, strength: null, copies: 3},
+    { label: "Aye, Aye, Sir!", type: "Effect", description: "Move an Ally to an adjacent unlocked location", cost: 1, strength: null, copies: 2},
+    { label: "Cannon", type: "Item", description: "This location gains Vanquish.", cost: 2, strength: null, copies: 2},
+    { label: "Cunning", type: "Condition", description: "During their turn, if another player has an Ally with a Strength of 4 or more in their Realm, you may play Cunning. Play an Ally from your hand for free.", cost: null, strength: null, copies: 2},
+    { label: "Cutlass", type: "Item", description: "When Cutlass is played, attach it to an Ally. That Ally gets +2 Strength.", cost: 1, strength: 2, copies: 2},
+    { label: "Hook's Case", type: "Item", description: "This location gains: Gain 1 Power", cost: 2, strength: null, copies: 2},
+    { label: "Obsession", type: "Condition", description: "During their turn, if another player defeats a Hero with a Strength of 4 or more, you may play Obsession. Reveal cards from the top of your Fate deck until you reveal a Hero. Either play or discard that Hero. Discard the rest.", cost: null, strength: null, copies: 2},
+    { label: "Pirate Brute", type: "Ally", description: "No additional Ability.", cost: 3, strength: 4, copies: 2},
+    { label: "Ingenious Device", type: "Item", description: "This location gains: Move Hero", cost: 2, strength: null, copies: 1},
+    { label: "Mr. Starkey", type: "Ally", description: "When Mr. Starkey is played, you may move a Hero from his location to an adjacent unlocked location.", cost: 2, strength: 2, copies: 1},
+    { label: "Never Land Map", type: "Item", description: "When Never Land Map is played, unlock Hangman's Tree. When you play an Item, you may discard Never Land Map instead of paying the Item's Cost.", cost: 4, strength: null, copies: 1},
+    { label: "Smee", type: "Ally", description: "Smee gets +2 Strength if he is at the Jolly Roger", cost: 2, strength: 2, copies: 1},
+  ],
+  fateDeck: [
+    { label: "Pixie Dust", type: "Effect", description: "When Pixie Dust is played, attach it to a Hero. That Hero gets +2 Strength", cost: null, strength: 2, copies: 3},
+    { label: "Lost Boys", type: "Hero", description: "When performing a Vanquish action to defeat Lost Boys, at least two Allies must be used.", cost: null, strength: 4, copies: 2},
+    { label: "Splitting Headache", type: "Effect", description: "Discard an Item from Captain Hook's Realm", cost: null, strength: null, copies: 2},
+    { label: "Taunt", type: "Item", description: "When Taunt is played, attach it to a Hero. Captain Hook must defeat Heroes with Taunt before defeating other Heroes.", cost: null, strength: null, copies: 2},
+    { label: "John", type: "Hero", description: "John gets +1 Strength if he has any Items attached to him.", cost: null, strength: 2, copies: 1},
+    { label: "Michael", type: "Hero", description: "Michael gets +1 Strength for each location in Captain Hook's Realm that has a Hero, including Michael's location", cost: null, strength: 1, copies: 1},
+    { label: "Peter Pan", type: "Hero", description: "When Peter Pan is revealed, you MUST IMMEDIATELY PLAY HIM to Hangman's Tree, even if it is locked. Any other Fate cards revealed during this action are discarded.", cost: null, strength: 8, copies: 1, ignoresLock: true},
+    { label: "Tick Tock", type: "Hero", description: "If Captain Hook moves to Tick Tock's location, Captain Hook must immediately discard his hand.", cost: null, strength: 5, copies: 1},
+    { label: "Tinker Bell", type: "Hero", description: "When Tinker Bell is played, you may discard one Ally from her location.", cost: null, strength: 2, copies: 1},
+    { label: "Wendy", type: "Hero", description: "All other Heroes in Captain Hook's Realm get +1 Strength.", cost: null, strength: 3, copies: 1},
+  ],
+};
