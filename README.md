@@ -16,14 +16,14 @@ npm run dev -w web      # http://localhost:5173
 
 To play against yourself, open a second browser tab. Each tab is its own player, keeps its seat through a reload, and a closed tab's seat can be picked back up from a new tab.
 
-Run `npm run cards` once to download the printed card images from the Villainous wiki, about 40 MB. Without them the game shows its parchment cards instead.
+The printed card images are in `web/public/cards`, about 40 MB. A card with no image shows as a parchment card.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `npm test` | Runs the server and client tests |
-| `npm run cards` | Downloads card images into `web/public/cards`. Add `-- --check` to report matches without downloading |
+| `npm run cards` | Downloads any missing card images from the Villainous wiki into `web/public/cards`. Add `-- --check` to report matches without downloading |
 | `npm run build` | Builds both packages |
 | `npm run lint` | Lints the client |
 | `npm run typecheck -w server` | Type-checks the server and its tests |
@@ -89,7 +89,7 @@ The two packages deploy separately. Build output is not committed, so the host h
 
 **Client:** run `npm run build` from `web/` and serve `web/dist`.
 
-Card images are git-ignored, because they are Ravensburger and Disney's artwork. A deployed site shows parchment cards unless you run `npm run cards` before the client build, which publishes the images with your site. That is a choice to make deliberately. About 30 MB of them are the large copies behind the zoom button, which a browser only loads when a card is opened.
+Card images deploy with the client. They are Ravensburger and Disney's artwork, from the Villainous fan wiki. About 30 MB of them are the large copies behind the zoom button, which a browser only loads when a card is opened.
 
 | Variable | Purpose |
 | --- | --- |

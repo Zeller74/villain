@@ -3,8 +3,8 @@
 //   node scripts/fetch-cards.mjs           download anything missing
 //   node scripts/fetch-cards.mjs --check   report what matches, download nothing
 //
-// The images are Ravensburger and Disney's artwork, so they are git-ignored rather than
-// committed. The game shows its parchment cards for any card without an image.
+// The images are committed, so this only needs running after a card is added to the data.
+// The game shows its parchment cards for any card without an image.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
