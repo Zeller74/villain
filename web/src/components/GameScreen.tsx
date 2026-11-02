@@ -6,6 +6,7 @@ import type { GameClient } from "../useGameClient";
 import { ActionLog } from "./ActionLog";
 import { Board, type BoardHandlers } from "./Board";
 import { CardFace } from "./CardFace";
+import { CardZoom } from "./CardZoom";
 import { DiscardModal } from "./DiscardModal";
 import { DiscardPeek } from "./DiscardPeek";
 import { FateDiscardModal } from "./FateDiscardModal";
@@ -29,6 +30,8 @@ export function GameScreen({ client, room }: { client: GameClient; room: RoomSta
   const [discardView, setDiscardView] = useState<Card[] | null>(null);
   const [fateDiscardView, setFateDiscardView] = useState<{ targetId: string; cards: Card[] } | null>(null);
   const [previewCard, setPreviewCard] = useState<Card | null>(null);
+  const [zoomedCard, setZoomedCard] = useState<Card | null>(null);
+  const cardViews = useMemo(() => ({setPreview: setPreviewCard, zoom: setZoomedCard}), []);
 
   const me = room.players.find(p => p.id === myId) ?? null;
   const focusPlayer = room.players.find(p => p.id === focusPlayerId) ?? me ?? room.players[0] ?? null;
@@ -167,7 +170,7 @@ export function GameScreen({ client, room }: { client: GameClient; room: RoomSta
     : "Waiting…";
 
   return (
-    <CardPreviewContext.Provider value={setPreviewCard}>
+    <CardPreviewContext.Provider value={cardViews}>
       <div className="game" data-villain={focusPlayer?.characterId}>
         <RoomHeader
           roomId={room.roomId}
@@ -314,7 +317,7 @@ export function GameScreen({ client, room }: { client: GameClient; room: RoomSta
           </aside>
         </main>
 
-        {previewCard && (
+        {previewCard && !zoomedCard && (
           <div className="card-preview" aria-hidden="true">
             <CardFace card={previewCard} size="lg" />
           </div>
@@ -358,6 +361,7 @@ export function GameScreen({ client, room }: { client: GameClient; room: RoomSta
             onDiscardOne={(discardId) => call("fateSift:choose", {discardId})}
           />
         )}
+        {zoomedCard && <CardZoom card={zoomedCard} onClose={() => setZoomedCard(null)} />}
       </div>
     </CardPreviewContext.Provider>
   );

@@ -226,6 +226,90 @@ describe("the hover preview", () => {
   });
 });
 
+describe("zooming a card", () => {
+  const zoomIn = (label: string) => fireEvent.click(screen.getByLabelText(`Zoom in on ${label}`));
+  const zoomed = () => document.querySelector(".card--zoom");
+  const largeArt = () => zoomed()?.querySelector<HTMLImageElement>('img[src^="/cards/large/"]') ?? null;
+
+  it("opens the large image of the card", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+    zoomIn("Smee");
+    expect(largeArt()?.getAttribute("src")).toBe("/cards/large/test/Smee.webp");
+  });
+
+  it("does not start a move on a board card", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+    zoomIn("Smee");
+    expect(moveBanner()).toBeNull();
+  });
+
+  it("does not select a hand card", () => {
+    enterGame(state(), [card("Cannon")]);
+    zoomIn("Cannon");
+    expect((screen.getByText("Discard") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("works on a board you are only looking at", () => {
+    enterGame(state({}, {activePlayerId: THEM}, {board: boardWith([card("Smee")])}));
+    fireEvent.click(screen.getByText("them"));
+    zoomIn("Smee");
+    expect(zoomed()).not.toBeNull();
+  });
+
+  it("closes from its button, from Escape and from a click on the backdrop", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+
+    zoomIn("Smee");
+    fireEvent.click(screen.getByText("Close"));
+    expect(zoomed()).toBeNull();
+
+    zoomIn("Smee");
+    fireEvent.keyDown(window, {key: "Escape"});
+    expect(zoomed()).toBeNull();
+
+    zoomIn("Smee");
+    fireEvent.click(screen.getByRole("dialog"));
+    expect(zoomed()).toBeNull();
+  });
+
+  it("opens over the discard pile without taking the card, and leaves the pile open", () => {
+    const discarded = card("Smee");
+    enterGame(state({discardTop: discarded, counts: {deck: 29, hand: 0, discard: 1, fateDeck: 15, fateDiscard: 0}}));
+    fireEvent.click(within(screen.getByText("Your discard").parentElement!).getByText("Open Discard"));
+    socket.reply("pile:getDiscard", {ok: true, cards: [discarded]});
+
+    zoomIn("Smee");
+    expect(socket.sentOf("pile:takeFromDiscard")).toHaveLength(0);
+    expect(screen.getAllByRole("dialog").pop()!.className).toContain("modal--top");
+
+    fireEvent.click(screen.getByText("Close", {selector: ".card-zoom__close"}));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it("hides the hover preview, which would sit on top of it", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+    fireEvent.mouseEnter(boardCard("Smee").closest(".card")!);
+    zoomIn("Smee");
+    expect(document.querySelector(".card-preview")).toBeNull();
+  });
+
+  it("puts no zoom button on the large copies", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+    fireEvent.mouseEnter(boardCard("Smee").closest(".card")!);
+    expect(document.querySelector(".card-preview .card__zoom")).toBeNull();
+    zoomIn("Smee");
+    expect(document.querySelector(".card-zoom .card__zoom")).toBeNull();
+  });
+
+  it("keeps the small image when there is no large one", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+    zoomIn("Smee");
+    fireEvent.error(largeArt()!);
+    expect(largeArt()?.hidden).toBe(true);
+    expect(zoomed()?.querySelector('img[src="/cards/test/Smee.webp"]')).not.toBeNull();
+  });
+});
+
 describe("the lobby", () => {
   it("opens the guide above every panel", () => {
     enterGame(state({}, {phase: "lobby", activePlayerId: null}));

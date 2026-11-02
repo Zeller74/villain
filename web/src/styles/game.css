@@ -351,6 +351,8 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  /* rows are shared across the board, so this one can be taller than its chips need */
+  align-content: center;
   gap: 3px;
 }
 

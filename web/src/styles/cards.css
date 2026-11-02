@@ -3,6 +3,7 @@
   --h: var(--card-h);
   --type: #5a4a38;
   --text-size: 0.71rem;
+  --zoom-size: 1.45rem;
   position: relative;
   /* keeps a card's own controls inside it, so a fanned card's buttons cannot sit on the next one */
   isolation: isolate;
@@ -31,6 +32,13 @@
   --h: auto;
   --text-size: 1.02rem;
   min-height: 200px;
+}
+
+/* as large as the window allows, in the shape of a printed card */
+.card--zoom {
+  --w: min(100vw - 32px, (100dvh - 32px) * 0.7065);
+  --h: calc(var(--w) / 0.7065);
+  --text-size: calc(var(--w) * 0.036);
 }
 
 .card.is-clickable {
@@ -109,7 +117,8 @@
   font-weight: 500;
 }
 
-.card--lg .card__body {
+.card--lg .card__body,
+.card--zoom .card__body {
   padding-bottom: 2.6em;
   mask-image: none;
 }
@@ -159,11 +168,32 @@
 .card__adjust.is-up { color: #b9e6a4; }
 .card__adjust.is-down { color: #ffb0a8; }
 
-.card__lock {
+.card__zoom {
   position: absolute;
   z-index: 2;
   top: 2px;
   right: 2px;
+  display: grid;
+  place-items: center;
+  width: var(--zoom-size);
+  height: var(--zoom-size);
+  padding: 0;
+  font-size: 0.85rem;
+  color: #f8eedb;
+  background: rgb(0 0 0 / 0.62);
+  border-color: rgb(255 255 255 / 0.35);
+}
+
+.card__zoom:hover:not(:disabled) {
+  background: var(--type);
+  border-color: #000;
+}
+
+.card__lock {
+  position: absolute;
+  z-index: 2;
+  top: 2px;
+  right: calc(var(--zoom-size) + 4px);
   display: grid;
   place-items: center;
   width: 1.45rem;
@@ -288,4 +318,55 @@
     pointer-events: none;
     filter: drop-shadow(0 12px 30px rgb(0 0 0 / 0.75));
   }
+
+  .card__zoom {
+    opacity: 0;
+  }
+
+  .card:hover .card__zoom,
+  .card__zoom:focus-visible {
+    opacity: 1;
+  }
+}
+
+/* Nothing to hover with, so the button stays on show. A tap does not bring a fanned card
+   forward, so it sits on the left edge, which always shows, clear of the cost and strength. */
+@media (hover: none) {
+  .card {
+    --zoom-size: 2rem;
+  }
+
+  .card__zoom {
+    top: 36%;
+    right: auto;
+    left: 1px;
+  }
+
+  .card__lock {
+    right: 2px;
+  }
+}
+
+/* the zoomed card has no dialog box around it */
+.card-zoom {
+  width: auto;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.card-zoom::after {
+  display: none;
+}
+
+.card-zoom__close {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  background: var(--ink-raised);
+  pointer-events: auto;
 }

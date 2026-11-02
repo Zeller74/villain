@@ -13,7 +13,7 @@ type CardFaceProps = {
   onToggleLock?: (nextLocked: boolean) => void;
   canAdjustStrength?: boolean;
   onAdjustStrength?: (delta: number) => void;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "zoom";
   title?: string;
 };
 
@@ -29,7 +29,8 @@ export function CardFace({
   size = "md",
   title,
 }: CardFaceProps) {
-  const setPreview = useContext(CardPreviewContext);
+  const views = useContext(CardPreviewContext);
+  const setPreview = views?.setPreview;
   const [failedArt, setFailedArt] = useState<string | null>(null);
   const cardId = card.id;
 
@@ -64,9 +65,34 @@ export function CardFace({
         />
       )}
 
+      {/* loads over the small image, which is already on screen and stays there if this one is missing */}
+      {size === "zoom" && (
+        <img
+          className="card__art"
+          src={`/cards/large/${card.art}.webp`}
+          alt=""
+          draggable={false}
+          onError={(e) => { e.currentTarget.hidden = true; }}
+        />
+      )}
+
       <div className="card__ribbon" title={`Type: ${card.type}`}>{card.type}</div>
 
       {card.cost !== null && <div className="card__cost" title="Cost">{card.cost}</div>}
+
+      {views && (size === "sm" || size === "md") && (
+        <button
+          className="card__zoom"
+          onClick={(e) => {
+            e.stopPropagation();
+            views.zoom(card);
+          }}
+          title="Zoom in"
+          aria-label={`Zoom in on ${card.label}`}
+        >
+          <Icon name="zoom" />
+        </button>
+      )}
 
       {canLock && (
         <button

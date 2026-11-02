@@ -14,7 +14,8 @@ const DATA = join(ROOT, "server/src/data/characters");
 const OUT = join(ROOT, "web/public/cards");
 const API = "https://disney-villainous.fandom.com/api.php";
 const HEADERS = {"User-Agent": "villain-card-fetch (personal fan project)"};
-const WIDTH = 480;
+//the game shows the small set; the zoom view loads a large image only when a card is opened
+const SIZES = [{dir: "", width: 480}, {dir: "large", width: 1000}];
 const PAUSE_MS = 250;
 
 //where the wiki's card page has the wrong picture: an animation cycling through a card's
@@ -179,19 +180,20 @@ async function main() {
 
   let saved = 0;
   for (const {card, image} of matched) {
-    const dir = join(OUT, card.villain);
-    const file = join(OUT, `${artKey(card)}.webp`);
-    if (existsSync(file)) continue;
-    const url = image.url.replace("/revision/latest", `/revision/latest/scale-to-width-down/${WIDTH}`);
-    const res = await fetch(url, {headers: HEADERS});
-    if (!res.ok) {
-      console.log(`failed: ${card.label} (${res.status})`);
-      continue;
+    for (const {dir, width} of SIZES) {
+      const file = join(OUT, dir, `${artKey(card)}.webp`);
+      if (existsSync(file)) continue;
+      const url = image.url.replace("/revision/latest", `/revision/latest/scale-to-width-down/${width}`);
+      const res = await fetch(url, {headers: HEADERS});
+      if (!res.ok) {
+        console.log(`failed: ${card.label} at ${width} (${res.status})`);
+        continue;
+      }
+      mkdirSync(dirname(file), {recursive: true});
+      writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+      saved++;
+      await sleep(PAUSE_MS);
     }
-    mkdirSync(dir, {recursive: true});
-    writeFileSync(file, Buffer.from(await res.arrayBuffer()));
-    saved++;
-    await sleep(PAUSE_MS);
   }
   console.log(`\nsaved ${saved} new images to web/public/cards`);
 }
