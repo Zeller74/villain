@@ -203,6 +203,12 @@ describe("the hover preview", () => {
 });
 
 describe("the lobby", () => {
+  it("opens the guide above every panel", () => {
+    enterGame(state({}, {phase: "lobby", activePlayerId: null}));
+    fireEvent.click(screen.getByLabelText("Open strategy guide"));
+    expect(screen.getByRole("dialog").parentElement).toBe(document.body);
+  });
+
   it("picks a villain from the portraits", () => {
     enterGame(state({}, {phase: "lobby", activePlayerId: null}));
     fireEvent.click(document.querySelector('button[data-villain="prince"]')!);
