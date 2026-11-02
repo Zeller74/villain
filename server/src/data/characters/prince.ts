@@ -22,7 +22,7 @@ export const prince: CharacterTemplate = {
     { label: "Golden Arrow", type: "Item", description: "When Golden Arrow is played, attach it to an Ally. When that Ally is used to defeat a Hero, gain 2 Power.", cost: 0, strength: null, copies: 1},
     { label: "Intimidation", type: "Effect", description: "Perform a Vanquish action, but do not discard the Allies used to defeat the Hero", cost: 2, strength: null, copies: 1},
     { label: "King Richard's Crown", type: "Item", description: "If Prince John is at this location, all card Costs are reduced by 1 Power.", cost: 1, strength: null, copies: 1},
-    { label: "Nusty", type: "Ally", description: "All other Allies at Nutsy's location get +1 Strength", cost: 2, strength: 2, copies: 1},
+    { label: "Nutsy", type: "Ally", description: "All other Allies at Nutsy's location get +1 Strength", cost: 2, strength: 2, copies: 1},
     { label: "Sheriff of Nottingham", type: "Ally", description: "Before Prince John moves, you may move Sheriff of Nottingham to any location and gain 1 Power if there are any Heroes at his new location.", cost: 3, strength: 3, copies: 1},
     { label: "Sir Hiss", type: "Ally", description: "If Prince John is at Sir Hiss's location, you may perform one action that is covered by a Hero at that location.", cost: 2, strength: 2, copies: 1},
     { label: "Trigger", type: "Ally", description: "All other Allies at Trigger's location get -1 Strength.", cost: 2, strength: 4, copies: 1},

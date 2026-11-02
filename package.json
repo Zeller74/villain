@@ -6,7 +6,8 @@
   "scripts": {
     "test": "npm test -w server && npm test -w web",
     "build": "npm run build -w server && npm run build -w web",
-    "lint": "npm run lint -w web"
+    "lint": "npm run lint -w web",
+    "cards": "node scripts/fetch-cards.mjs"
   },
   "keywords": [],
   "author": "",

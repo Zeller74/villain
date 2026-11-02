@@ -33,7 +33,8 @@ export const lady: CharacterTemplate = {
   fateDeck: [
     { label: "Bibbidi-Bobbidi-Boo", type: "Effect", description: "Remove a Trapped Token from any Hero, then move that Hero to a new location.", cost: null, strength: null, copies: 3},
     { label: "Sweet Nightingale", type: "Effect", description: "Move an Ally to any location.", cost: null, strength: null, copies: 3},
-    { label: "Glass Slipper", type: "Item", description: "This Glass Slipper does not attach to a Hero and must be played to Cinderella's Room. Lady Tremaine cannot win the game while a Glass Slipper is in her Realm.", cost: null, strength: null, copies: 2},
+    { label: "Glass Slipper", type: "Item", description: "This Glass Slipper does not attach to a Hero and must be played to Cinderella's Room. Lady Tremaine cannot win the game while a Glass Slipper is in her Realm.", cost: null, strength: null, copies: 1, art: "glass-slipper-cinderellas-room"},
+    { label: "Glass Slipper", type: "Item", description: "This Glass Slipper does not attach to a Hero and must be played to The Castle. Lady Tremaine cannot win the game while a Glass Slipper is in her Realm.", cost: null, strength: null, copies: 1, art: "glass-slipper-the-castle"},
     { label: "Ball Gown Cinderella", type: "Hero", description: "Discard Cinderella to play Ball Gown Cinderella. While Ball Gown Cinderella is in play, no Allies may enter The Ballroom. This card cannot be Trapped. When Ball Gown Cinderella is defeated, find both Glass Slippers and play them.", cost: null, strength: 2, copies: 1},
     { label: "Bruno", type: "Hero", description: "When Bruno is played or moved, move Lucifer to his location.", cost: null, strength: 3, copies: 1},
     { label: "Cinderella", type: "Hero", description: "While Cinderella is in play, all Effect cards cost +2 Power. Cinderella may not be played if Ball Gown Cinderella is in play.", cost: null, strength: 2, copies: 1},

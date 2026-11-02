@@ -11,13 +11,20 @@ export function shuffle<T>(arr: T[]): void {
   }
 }
 
-export function expandDeck(templates: CardTemplate[]): Card[] {
+//must stay the same as slug in scripts/fetch-cards.mjs
+export function artPath(villain: string, label: string) {
+  const slug = label.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `${villain}/${slug}`;
+}
+
+export function expandDeck(templates: CardTemplate[], villain: string): Card[] {
   const out: Card[] = [];
   for (const t of templates) {
     for (let i = 0; i < (t.copies ?? 1); i++) {
       out.push({
         id: nanoid(8),
         label: t.label,
+        art: artPath(villain, t.art ?? t.label),
         type: t.type,
         desc: t.description ?? "",
         cost: t.cost ?? null,
@@ -51,6 +58,7 @@ export function makeBuzz(): Card {
   return {
     id: nanoid(8),
     label: "Buzz Lightyear",
+    art: artPath("lotso", "Buzz Lightyear"),
     cost: null,
     baseStrength: null,
     strength: 0,
@@ -64,6 +72,7 @@ export function makeDemoBuzz(): Card {
   return {
     id: nanoid(8),
     label: "Demo Mode Buzz Lightyear",
+    art: artPath("lotso", "Demo Mode Buzz Lightyear"),
     cost: null,
     baseStrength: 1,
     strength: 0,

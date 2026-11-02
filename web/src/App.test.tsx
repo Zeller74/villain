@@ -14,7 +14,7 @@ const SEAT = {roomId: "room1", playerId: ME, token: "secret"};
 let socket: FakeSocket;
 
 const card = (id: string, over: Partial<Card> = {}): Card => ({
-  id, label: id, type: "Ally", desc: "", cost: 2, baseStrength: 2, strength: 0, locked: false, ...over,
+  id, label: id, art: `test/${id}`, type: "Ally", desc: "", cost: 2, baseStrength: 2, strength: 0, locked: false, ...over,
 });
 
 const location = (i: number, over: Partial<Location> = {}): Location => ({
@@ -151,6 +151,30 @@ describe("Condition cards", () => {
     expect((screen.getByText("Draw 1") as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByText("Done"));
     expect(socket.sentOf("reaction:end")).toHaveLength(1);
+  });
+});
+
+describe("printed card images", () => {
+  const art = () => document.querySelector<HTMLImageElement>(`[data-testid="bottom-0"] .card__art`);
+
+  it("shows a card's image, with its text still underneath", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+    expect(art()?.getAttribute("src")).toBe("/cards/test/Smee.webp");
+    expect(boardCard("Smee")).toBeTruthy();
+  });
+
+  it("falls back to the parchment card when there is no image", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+    fireEvent.error(art()!);
+    expect(art()).toBeNull();
+    expect(boardCard("Smee")).toBeTruthy();
+  });
+
+  it("keeps the strength counter visible on top of the image", () => {
+    enterGame(state({}, {}, {board: boardWith([card("Smee", {strength: 2})])}));
+    fireEvent.click(screen.getByText("them"));
+    expect(screen.getByTitle("Current strength").textContent).toBe("+2");
+    expect(art()).not.toBeNull();
   });
 });
 

@@ -49,7 +49,7 @@ const SPECIAL_SETUP: Record<string, (p: Player) => void> = {
 export function setupPlayerForGame(p: Player) {
   const character = getCharacter(p.characterId);
   p.board = makeBoardFrom(character.locations);
-  p.zones = {...emptyZones(), deck: expandDeck(character.deck), fateDeck: expandDeck(character.fateDeck)};
+  p.zones = {...emptyZones(), deck: expandDeck(character.deck, character.id), fateDeck: expandDeck(character.fateDeck, character.id)};
   p.power = 0;
   p.trust = 0;
   p.won = false;

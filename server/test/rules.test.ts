@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { lady } from "../src/data/characters/lady";
+import { expandDeck } from "../src/game/cards";
 import { boardCards, deckTotal, drawCard, drawUntil, startGame, startServer } from "./helpers";
 
 describe("Condition cards", () => {
@@ -248,6 +250,20 @@ describe("villain data", () => {
       expect(p.counts.deck, `${id} deck`).toBe(30);
       expect(p.counts.fateDeck, `${id} fate deck`).toBe(15);
     }
+  });
+
+  it("points every card at its printed image", async () => {
+    const {clients: [a]} = await startGame(["lady", "captain"]);
+    for (let i = 0; i < 6; i++) await a!.must("game:draw", {count: 5});
+    const arts = a!.self.hand.map(c => c.art);
+    expect(arts).toContain("lady/i-said-if");
+    expect(arts).toContain("lady/invitation-from-the-king");
+  });
+
+  it("deals both printed versions of Glass Slipper", () => {
+    const slippers = expandDeck(lady.fateDeck, "lady").filter(c => c.label === "Glass Slipper");
+    expect(slippers.map(c => c.art)).toEqual(["lady/glass-slipper-cinderellas-room", "lady/glass-slipper-the-castle"]);
+    expect(slippers[1]!.desc).toContain("The Castle");
   });
 
   it("includes Ball Gown Drizella", async () => {

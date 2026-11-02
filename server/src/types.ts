@@ -1,6 +1,6 @@
 import type { ActionKind, Board, Card, CardType, ChatMsg, GameMeta, LocationIndex } from "./protocol";
 
-export type CardTemplate = {label: string; type: CardType; description?: string; cost?: number | null; strength?: number | null; copies?: number; ignoresLock?: boolean};
+export type CardTemplate = {label: string; type: CardType; description?: string; cost?: number | null; strength?: number | null; copies?: number; art?: string; ignoresLock?: boolean};
 export type LocationTemplate = {name: string; actions: ActionKind[]; topSlots?: number};
 export type CharacterTemplate = {id: string; name: string; deck: CardTemplate[]; fateDeck: CardTemplate[]; locations: LocationTemplate[]};
 

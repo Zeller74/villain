@@ -6,6 +6,9 @@ dist/
 dist-ssr/
 *.tsbuildinfo
 
+# Card scans are the publishers' artwork, so they stay local. See scripts/fetch-cards.mjs
+web/public/cards/
+
 # Local config
 .env
 .env.*

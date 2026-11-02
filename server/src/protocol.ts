@@ -9,6 +9,7 @@ export type Card = {
   id: string;
   type: CardType;
   label: string;
+  art: string; //where its printed image would be under /cards; the image is optional
   desc: string;
   cost: number | null;
   baseStrength: number | null;

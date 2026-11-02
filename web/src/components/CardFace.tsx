@@ -1,4 +1,4 @@
-import { useContext, useEffect } from "react";
+import { useContext, useEffect, useState } from "react";
 import { CardPreviewContext } from "../cardPreview";
 import { cx } from "../cx";
 import type { Card } from "../protocol";
@@ -30,6 +30,7 @@ export function CardFace({
   title,
 }: CardFaceProps) {
   const setPreview = useContext(CardPreviewContext);
+  const [failedArt, setFailedArt] = useState<string | null>(null);
   const cardId = card.id;
 
   //a card that leaves play gets no mouse-leave, so its preview has to be cleared here
@@ -52,6 +53,17 @@ export function CardFace({
       onMouseEnter={() => setPreview?.(card)}
       onMouseLeave={() => setPreview?.(null)}
     >
+      {/* sits over the parchment card, which stays underneath for any card without an image */}
+      {failedArt !== card.art && (
+        <img
+          className="card__art"
+          src={`/cards/${card.art}.webp`}
+          alt=""
+          draggable={false}
+          onError={() => setFailedArt(card.art)}
+        />
+      )}
+
       <div className="card__ribbon" title={`Type: ${card.type}`}>{card.type}</div>
 
       {card.cost !== null && <div className="card__cost" title="Cost">{card.cost}</div>}

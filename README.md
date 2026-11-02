@@ -16,11 +16,14 @@ npm run dev -w web      # http://localhost:5173
 
 To play against yourself, open a second browser tab. Each tab is its own player, keeps its seat through a reload, and a closed tab's seat can be picked back up from a new tab.
 
+Run `npm run cards` once to download the printed card images from the Villainous wiki. Without them the game shows its parchment cards instead.
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `npm test` | Runs the server and client tests |
+| `npm run cards` | Downloads card images into `web/public/cards`. Add `-- --check` to report matches without downloading |
 | `npm run build` | Builds both packages |
 | `npm run lint` | Lints the client |
 | `npm run typecheck -w server` | Type-checks the server and its tests |
@@ -57,6 +60,7 @@ web/src/
 3. Add `<id>Prof.jpg` and `<id>Back.jpg` to `web/public/character/`. Missing images fall back to initials and a default card back.
 4. Add a guide to `web/src/data/guides.ts`, and any character actions to `menus` in `web/src/components/CharacterMenu.tsx`.
 5. Give them a colour in `web/src/styles/tokens.css`. It tints the board whenever their Realm is on show.
+6. Run `npm run cards` to fetch their card images. It only accepts a wiki page that names this villain, and lists anything it could not match.
 
 ## Adding a client event
 
@@ -84,6 +88,8 @@ The two packages deploy separately. Build output is not committed, so the host h
 `GET /healthz` returns 200 for host health checks.
 
 **Client:** run `npm run build` from `web/` and serve `web/dist`.
+
+Card images are git-ignored, because they are Ravensburger and Disney's artwork. A deployed site shows parchment cards unless you run `npm run cards` before the client build, which publishes the images with your site. That is a choice to make deliberately.
 
 | Variable | Purpose |
 | --- | --- |
