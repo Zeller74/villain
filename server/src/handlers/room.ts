@@ -39,6 +39,8 @@ export function registerRoomHandlers({on, onPublic}: Binder) {
   onPublic("room:resume", ({io, socket, payload}) => {
     const room = rooms.get(payload.roomId) ?? fail("room not found");
     const player = room.players.find(p => p.token === payload.token) ?? fail("seat not found");
+    //a tab may replace its own dead connection, but a new tab must not steal a live seat
+    if (player.socketId && !payload.takeOver) fail("seat in use");
     if (socket.data.roomId !== room.id) leaveSeat(io, socket, "switching rooms");
 
     const wasGone = player.socketId === null;

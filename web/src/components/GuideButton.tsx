@@ -18,6 +18,7 @@ export function GuideButton({ characterId }: { characterId: string | null }) {
           height: 22,
           borderRadius: "50%",
           border: "1px solid #a1a1a1ff",
+          background: "#1e293b",
           color: "#e5e7eb",
           display: "grid",
           placeItems: "center",

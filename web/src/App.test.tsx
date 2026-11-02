@@ -247,7 +247,7 @@ describe("losing the connection", () => {
     socket.receive("disconnect", "transport close");
     socket.receive("connect");
     expect(socket.sentOf("room:resume")).toHaveLength(2);
-    expect(socket.sentOf("room:resume")[1]!.payload).toEqual({roomId: "room1", token: "secret"});
+    expect(socket.sentOf("room:resume")[1]!.payload).toEqual({roomId: "room1", token: "secret", takeOver: true});
   });
 
   it("returns home with an explanation if the game is gone", () => {
@@ -273,6 +273,27 @@ describe("losing the connection", () => {
     socket.receive("connect");
     expect(socket.sentOf("room:resume")).toHaveLength(0);
     expect(screen.getByText("Join this room")).toBeTruthy();
+  });
+
+  it("starts a new tab as a new player while another tab holds the seat", () => {
+    localStorage.setItem("villain.seat", JSON.stringify(SEAT));
+    render(<App />);
+    socket.receive("connect");
+    expect(socket.sentOf("room:resume")[0]!.payload).toEqual({roomId: "room1", token: "secret", takeOver: false});
+
+    socket.reply("room:resume", {ok: false, error: "seat in use"});
+
+    expect(screen.getByText("Create Room")).toBeTruthy();
+    expect(toast()).toBeNull();
+    expect(localStorage.getItem("villain.seat")).not.toBeNull();
+  });
+
+  it("adopts a seat recovered in a new tab, so a reload keeps it", () => {
+    localStorage.setItem("villain.seat", JSON.stringify(SEAT));
+    render(<App />);
+    socket.receive("connect");
+    socket.reply("room:resume", {ok: true, ...SEAT});
+    expect(sessionStorage.getItem("villain.seat")).not.toBeNull();
   });
 
   it("does not try to resume when there is no saved seat", () => {

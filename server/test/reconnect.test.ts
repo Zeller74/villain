@@ -7,7 +7,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function reconnect(connectClient: () => Promise<Client>, old: Client) {
   const client = await connectClient();
   client.seat = old.seat;
-  await client.must("room:resume", {roomId: old.seat.roomId, token: old.seat.token});
+  await client.must("room:resume", {roomId: old.seat.roomId, token: old.seat.token, takeOver: true});
   return client;
 }
 
@@ -57,7 +57,7 @@ describe("losing a connection", () => {
 
     const client = await connectClient();
     const history = new Promise<{messages: {text: string}[]}>((r) => client.socket.once("chat:history", r));
-    await client.must("room:resume", {roomId: a!.seat.roomId, token: a!.seat.token});
+    await client.must("room:resume", {roomId: a!.seat.roomId, token: a!.seat.token, takeOver: true});
     expect((await history).messages.map(m => m.text)).toContain("before the drop");
     expect(client.log.length).toBeGreaterThan(0);
   });
@@ -75,16 +75,30 @@ describe("losing a connection", () => {
     await back.must("game:draw", {count: 1});
   });
 
+  it("does not let a new tab take a seat someone is still sitting in", async () => {
+    const {connectClient, clients: [a]} = await startGame(["captain", "lady"]);
+    const newTab = await connectClient();
+    const seat = {roomId: a!.seat.roomId, token: a!.seat.token, takeOver: false};
+
+    expect(await newTab.error("room:resume", seat)).toBe("seat in use");
+    await a!.must("game:draw", {count: 1});
+
+    a!.close();
+    await wait(30);
+    await newTab.must("room:resume", seat);
+    expect(newTab.state.game.activePlayerId).toBe(a!.seat.playerId);
+  });
+
   it("rejects a wrong token", async () => {
     const {connectClient, clients: [a]} = await startGame(["captain", "lady"]);
     const stranger = await connectClient();
-    expect(await stranger.error("room:resume", {roomId: a!.seat.roomId, token: "guess"})).toBe("seat not found");
+    expect(await stranger.error("room:resume", {roomId: a!.seat.roomId, token: "guess", takeOver: true})).toBe("seat not found");
   });
 
   it("reports a room that no longer exists", async () => {
     const {connectClient} = await startServer();
     const client = await connectClient();
-    expect(await client.error("room:resume", {roomId: "gone", token: "x"})).toBe("room not found");
+    expect(await client.error("room:resume", {roomId: "gone", token: "x", takeOver: true})).toBe("room not found");
   });
 });
 
@@ -158,7 +172,7 @@ describe("the grace period running out", () => {
     b!.close();
     await wait(120);
     const client = await connectClient();
-    expect(await client.error("room:resume", {roomId: a!.seat.roomId, token: a!.seat.token})).toBe("room not found");
+    expect(await client.error("room:resume", {roomId: a!.seat.roomId, token: a!.seat.token, takeOver: true})).toBe("room not found");
   });
 });
 

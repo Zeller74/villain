@@ -50,12 +50,16 @@ export function useGameClient() {
       //an invite to a different room wins over an old seat
       const saved = loadSeat();
       const invited = invitedRoom();
-      if (!saved || (invited && invited !== saved.roomId)) return;
-      s.emit("room:resume", {roomId: saved.roomId, token: saved.token}, (res: Ack<Seat>) => {
+      if (!saved || (invited && invited !== saved.seat.roomId)) return;
+      const {roomId, token} = saved.seat;
+      s.emit("room:resume", {roomId, token, takeOver: saved.ownTab}, (res: Ack<Seat>) => {
         if (res.ok) {
+          saveSeat(res);
           setMyId(res.playerId);
           return;
         }
+        //someone is still sitting there, so this tab is simply a new player
+        if (res.error === "seat in use") return;
         clearSeat();
         forgetRoom();
         setLastError("That game is no longer available.");

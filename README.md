@@ -14,7 +14,7 @@ npm run dev -w server   # http://localhost:3001
 npm run dev -w web      # http://localhost:5173
 ```
 
-To play against yourself, open a second browser tab. Each tab is its own player.
+To play against yourself, open a second browser tab. Each tab is its own player, and keeps its seat through a reload.
 
 ## Commands
 
@@ -72,7 +72,7 @@ Rooms live in memory, so restarting the server ends every game.
 
 The two packages deploy separately. Build output is not committed, so the host has to build.
 
-**Server:** run `npm install`, then `npm run build`, then `npm start` from `server/`.
+**Server:** from `server/`, run `npm install --include=dev`, then `npm run build`, then `npm start`. The build needs TypeScript, which is a dev dependency.
 
 | Variable | Purpose |
 | --- | --- |

@@ -14,7 +14,7 @@ export const schemas = {
 
   "room:create": z.object({name: Name}),
   "room:join": z.object({roomId: Id, name: Name}),
-  "room:resume": z.object({roomId: Id, token: Id}),
+  "room:resume": z.object({roomId: Id, token: Id, takeOver: z.boolean()}),
   "room:leave": NoPayload,
   "chat:send": z.object({text: z.string().trim().min(1).transform(s => s.slice(0, 300))}),
 

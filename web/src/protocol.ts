@@ -109,7 +109,7 @@ export type ClientEvents = {
 
   "room:create": { payload: { name: string }; result: Seat };
   "room:join": { payload: { roomId: string; name: string }; result: Seat };
-  "room:resume": { payload: { roomId: string; token: string }; result: Seat };
+  "room:resume": { payload: { roomId: string; token: string; takeOver: boolean }; result: Seat };
   "room:leave": { payload: unknown; result: void };
   "chat:send": { payload: { text: string }; result: void };
 
