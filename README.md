@@ -14,7 +14,7 @@ npm run dev -w server   # http://localhost:3001
 npm run dev -w web      # http://localhost:5173
 ```
 
-To play against yourself, open a second browser tab. Each tab is its own player, and keeps its seat through a reload.
+To play against yourself, open a second browser tab. Each tab is its own player, keeps its seat through a reload, and a closed tab's seat can be picked back up from a new tab.
 
 ## Commands
 
@@ -64,7 +64,7 @@ web/src/
 
 ## Reconnecting
 
-Players are identified by a stable id and a secret seat token, not by their socket. Dropping out holds the seat for 30 seconds in the lobby or 5 minutes in a game, and the client reclaims it automatically. Other players see that person as offline, and the game waits for them if it's their turn. When the grace period ends they are removed, any open fate cards go back, and the turn passes on. The times are in `app.ts`.
+Players are identified by a stable id and a secret seat token, not by their socket. Dropping out holds the seat for 30 seconds in the lobby or 5 minutes in a game, and the client reclaims it automatically. A browser remembers every seat it holds, so a new tab takes the first one nobody is connected to; a seat in use is never taken this way. Other players see that person as offline, and the game waits for them if it's their turn. When the grace period ends they are removed, any open fate cards go back, and the turn passes on. The times are in `app.ts`.
 
 Rooms live in memory, so restarting the server ends every game.
 

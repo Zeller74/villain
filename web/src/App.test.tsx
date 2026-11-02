@@ -55,6 +55,9 @@ const handCard = (label: string) => within(screen.getByText("Your hand").parentE
 const boardCard = (label: string, at = 0) => within(screen.getByTestId(`bottom-${at}`)).getByText(label);
 const moveBanner = () => screen.queryByText(/click a location to drop/);
 const toast = () => screen.queryByRole("alert")?.textContent ?? null;
+const OTHER_SEAT = {roomId: "room1", playerId: THEM, token: "theirs"};
+const saveBrowserSeats = (...seats: unknown[]) => localStorage.setItem("villain.seats", JSON.stringify(seats));
+const browserSeats = () => JSON.parse(localStorage.getItem("villain.seats") ?? "[]") as {token: string}[];
 
 beforeEach(() => {
   socket = new FakeSocket();
@@ -276,7 +279,7 @@ describe("losing the connection", () => {
   });
 
   it("starts a new tab as a new player while another tab holds the seat", () => {
-    localStorage.setItem("villain.seat", JSON.stringify(SEAT));
+    saveBrowserSeats(SEAT);
     render(<App />);
     socket.receive("connect");
     expect(socket.sentOf("room:resume")[0]!.payload).toEqual({roomId: "room1", token: "secret", takeOver: false});
@@ -285,11 +288,60 @@ describe("losing the connection", () => {
 
     expect(screen.getByText("Create Room")).toBeTruthy();
     expect(toast()).toBeNull();
-    expect(localStorage.getItem("villain.seat")).not.toBeNull();
+    expect(browserSeats()).toHaveLength(1);
+  });
+
+  it("finds a closed tab's seat when the newest saved seat is another open tab's", () => {
+    saveBrowserSeats(OTHER_SEAT, SEAT);
+    render(<App />);
+    socket.receive("connect");
+    expect(socket.sentOf("room:resume")[0]!.payload).toEqual({roomId: "room1", token: "theirs", takeOver: false});
+
+    socket.reply("room:resume", {ok: false, error: "seat in use"});
+    expect(socket.sentOf("room:resume")[1]!.payload).toEqual({roomId: "room1", token: "secret", takeOver: false});
+
+    socket.reply("room:resume", {ok: true, ...SEAT});
+    expect(JSON.parse(sessionStorage.getItem("villain.seat")!).token).toBe("secret");
+    expect(browserSeats()).toHaveLength(2);
+  });
+
+  it("only looks for seats in the room it was invited to", () => {
+    saveBrowserSeats({...SEAT, roomId: "elsewhere", token: "old"}, SEAT);
+    window.history.replaceState(null, "", "/?room=room1");
+    render(<App />);
+    socket.receive("connect");
+    expect(socket.sentOf("room:resume")).toHaveLength(1);
+    expect(socket.sentOf("room:resume")[0]!.payload).toEqual({roomId: "room1", token: "secret", takeOver: false});
+  });
+
+  it("drops seats whose game is gone, and says so if nothing was recovered", () => {
+    saveBrowserSeats(SEAT);
+    render(<App />);
+    socket.receive("connect");
+    socket.reply("room:resume", {ok: false, error: "seat not found"});
+    expect(toast()).toBe("That game is no longer available.");
+    expect(browserSeats()).toHaveLength(0);
+  });
+
+  it("stays quiet about a dead seat when another one was recovered", () => {
+    saveBrowserSeats({...SEAT, token: "dead"}, SEAT);
+    render(<App />);
+    socket.receive("connect");
+    socket.reply("room:resume", {ok: false, error: "seat not found"});
+    socket.reply("room:resume", {ok: true, ...SEAT});
+    expect(toast()).toBeNull();
+    expect(browserSeats().map(s => s.token)).toEqual(["secret"]);
+  });
+
+  it("does not lose track of a seat another tab took over", () => {
+    enterGame(state());
+    socket.receive("disconnect", "io server disconnect");
+    expect(sessionStorage.getItem("villain.seat")).toBeNull();
+    expect(browserSeats()).toHaveLength(1);
   });
 
   it("adopts a seat recovered in a new tab, so a reload keeps it", () => {
-    localStorage.setItem("villain.seat", JSON.stringify(SEAT));
+    saveBrowserSeats(SEAT);
     render(<App />);
     socket.receive("connect");
     socket.reply("room:resume", {ok: true, ...SEAT});
@@ -330,8 +382,16 @@ describe("leaving", () => {
     enterGame(state());
     fireEvent.click(screen.getByText("Leave Room"));
     expect(sessionStorage.getItem("villain.seat")).toBeNull();
+    expect(browserSeats()).toHaveLength(0);
     expect(screen.getByText("Create Room")).toBeTruthy();
     expect(socket.sentOf("room:leave")).toHaveLength(1);
+  });
+
+  it("leaves other seats in this browser alone", () => {
+    saveBrowserSeats(OTHER_SEAT);
+    enterGame(state());
+    fireEvent.click(screen.getByText("Leave Room"));
+    expect(browserSeats().map(s => s.token)).toEqual(["theirs"]);
   });
 });
 

@@ -1,43 +1,60 @@
 import type { Seat } from "./protocol";
 
-const KEY = "villain.seat";
+const TAB_KEY = "villain.seat";
+const BROWSER_KEY = "villain.seats";
+const MAX_SAVED = 10;
 
-//sessionStorage keeps two tabs on one computer as separate players; localStorage is the
-//fallback for a closed tab or a phone browser that discarded it. Either may be unavailable,
-//so reading never throws
-function read(storage: Storage): Seat | null {
+//sessionStorage holds this tab's own seat, and comes back when a closed tab is restored.
+//localStorage holds every seat this browser has, so a new tab can pick up one whose tab
+//was closed. Either may be unavailable, so nothing here throws
+function read<T>(storage: Storage, key: string): T | null {
   try {
-    const raw = storage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as Seat) : null;
+    const raw = storage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
   }
 }
 
-//ownTab says this tab held the seat. Otherwise it may belong to another tab that is still open
-export function loadSeat(): {seat: Seat; ownTab: boolean} | null {
-  const own = read(sessionStorage);
-  if (own) return {seat: own, ownTab: true};
-  const last = read(localStorage);
-  return last ? {seat: last, ownTab: false} : null;
+function write(storage: Storage, key: string, value: unknown) {
+  try {
+    storage.setItem(key, JSON.stringify(value));
+  } catch {
+    //private windows can refuse storage. The game still works, just without resuming
+  }
+}
+
+function remove(storage: Storage, key: string) {
+  try {
+    storage.removeItem(key);
+  } catch {
+    //nothing was stored if storage is unavailable
+  }
+}
+
+export function loadTabSeat(): Seat | null {
+  return read<Seat>(sessionStorage, TAB_KEY);
+}
+
+//newest first
+export function loadBrowserSeats(): Seat[] {
+  const seats = read<Seat[]>(localStorage, BROWSER_KEY);
+  return Array.isArray(seats) ? seats : [];
 }
 
 export function saveSeat(seat: Seat) {
-  for (const storage of [sessionStorage, localStorage]) {
-    try {
-      storage.setItem(KEY, JSON.stringify(seat));
-    } catch {
-      //private windows can refuse storage. The game still works, just without resuming
-    }
-  }
+  write(sessionStorage, TAB_KEY, seat);
+  const others = loadBrowserSeats().filter(s => s.token !== seat.token);
+  write(localStorage, BROWSER_KEY, [seat, ...others].slice(0, MAX_SAVED));
 }
 
-export function clearSeat() {
-  for (const storage of [sessionStorage, localStorage]) {
-    try {
-      storage.removeItem(KEY);
-    } catch {
-      //nothing was stored if storage is unavailable
-    }
-  }
+//this tab no longer holds its seat, but the seat still exists
+export function releaseTabSeat() {
+  remove(sessionStorage, TAB_KEY);
+}
+
+//the seat is gone for good
+export function forgetSeat(seat: Seat) {
+  if (loadTabSeat()?.token === seat.token) releaseTabSeat();
+  write(localStorage, BROWSER_KEY, loadBrowserSeats().filter(s => s.token !== seat.token));
 }

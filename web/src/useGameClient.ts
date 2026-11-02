@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
 import type { Ack, Card, CharacterPreview, ChatMsg, EventName, LogItem, Payload, Pending, Result, RoomState, Seat, SelfState } from "./protocol";
-import { clearSeat, loadSeat, saveSeat } from "./seat";
+import { forgetSeat, loadBrowserSeats, loadTabSeat, releaseTabSeat, saveSeat } from "./seat";
 import { makeSocket } from "./socket";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -9,6 +9,7 @@ export type Call = <E extends EventName>(event: E, payload: Payload<E>, onOk?: (
 export type GameClient = ReturnType<typeof useGameClient>;
 
 const ERROR_MS = 2200;
+const GAME_GONE = "That game is no longer available.";
 
 const invitedRoom = () => new URLSearchParams(window.location.search).get("room")?.trim() || null;
 
@@ -36,9 +37,46 @@ export function useGameClient() {
     setLogItems([]);
   }, []);
 
+  const enterSeat = useCallback((seat: Seat) => {
+    saveSeat(seat);
+    setMyId(seat.playerId);
+  }, []);
+
   useEffect(() => {
     const s = makeSocket();
     socketRef.current = s;
+
+    //a tab may take back its own seat, even from a connection that still looks alive
+    const resumeOwnSeat = (seat: Seat) => {
+      const {roomId, token} = seat;
+      s.emit("room:resume", {roomId, token, takeOver: true}, (res: Ack<Seat>) => {
+        if (res.ok) {
+          enterSeat(res);
+          return;
+        }
+        forgetSeat(seat);
+        forgetRoom();
+        setLastError(GAME_GONE);
+      });
+    };
+
+    //a new tab tries each seat this browser holds, and takes the first one nobody is sitting in
+    const resumeFreeSeat = ([seat, ...rest]: Seat[], anyGone = false) => {
+      if (!seat) {
+        if (anyGone) setLastError(GAME_GONE);
+        return;
+      }
+      const {roomId, token} = seat;
+      s.emit("room:resume", {roomId, token, takeOver: false}, (res: Ack<Seat>) => {
+        if (res.ok) {
+          enterSeat(res);
+          return;
+        }
+        const gone = res.error !== "seat in use";
+        if (gone) forgetSeat(seat);
+        resumeFreeSeat(rest, anyGone || gone);
+      });
+    };
 
     s.on("connect", () => {
       setStatus("connected");
@@ -47,30 +85,18 @@ export function useGameClient() {
         else setLastError(res.error);
       });
 
-      //an invite to a different room wins over an old seat
-      const saved = loadSeat();
+      //an invite to a different room wins over any seat elsewhere
       const invited = invitedRoom();
-      if (!saved || (invited && invited !== saved.seat.roomId)) return;
-      const {roomId, token} = saved.seat;
-      s.emit("room:resume", {roomId, token, takeOver: saved.ownTab}, (res: Ack<Seat>) => {
-        if (res.ok) {
-          saveSeat(res);
-          setMyId(res.playerId);
-          return;
-        }
-        //someone is still sitting there, so this tab is simply a new player
-        if (res.error === "seat in use") return;
-        clearSeat();
-        forgetRoom();
-        setLastError("That game is no longer available.");
-      });
+      const own = loadTabSeat();
+      if (own && (!invited || invited === own.roomId)) resumeOwnSeat(own);
+      else resumeFreeSeat(loadBrowserSeats().filter(seat => !invited || seat.roomId === invited));
     });
 
     s.on("disconnect", (reason) => {
       setStatus("disconnected");
       //the server dropped us on purpose, which only happens when this seat opened elsewhere
       if (reason === "io server disconnect") {
-        clearSeat();
+        releaseTabSeat();
         forgetRoom();
         setLastError("This game was opened somewhere else.");
         s.connect();
@@ -89,7 +115,7 @@ export function useGameClient() {
     return () => {
       s.close();
     };
-  }, [forgetRoom]);
+  }, [forgetRoom, enterSeat]);
 
   useEffect(() => {
     if (!lastError) return;
@@ -109,11 +135,6 @@ export function useGameClient() {
     });
   }, []);
 
-  const enterSeat = useCallback((seat: Seat) => {
-    saveSeat(seat);
-    setMyId(seat.playerId);
-  }, []);
-
   const createRoom = useCallback((name: string) => {
     call("room:create", {name}, enterSeat);
   }, [call, enterSeat]);
@@ -124,7 +145,8 @@ export function useGameClient() {
 
   const leaveRoom = useCallback(() => {
     socketRef.current?.emit("room:leave", {});
-    clearSeat();
+    const seat = loadTabSeat();
+    if (seat) forgetSeat(seat);
     forgetRoom();
     setInvitedRoomId(null);
     window.history.replaceState(null, "", window.location.pathname);
