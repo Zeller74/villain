@@ -44,6 +44,7 @@ web/src/
   useGameClient.ts  owns the socket and everything the server sends
   protocol.ts       identical copy of the server's protocol.ts
   components/       screens, board, modals
+  styles/           all the styling; tokens.css holds the colours and fonts
   data/guides.ts    strategy guide text
 ```
 
@@ -54,7 +55,8 @@ web/src/
 1. Add `server/src/data/characters/<id>.ts` and list it in `data/characters/index.ts`.
 2. If the villain starts with something in play, add it to `SPECIAL_SETUP` in `game/setup.ts`.
 3. Add `<id>Prof.jpg` and `<id>Back.jpg` to `web/public/character/`. Missing images fall back to initials and a default card back.
-4. Add a guide to `web/src/data/guides.ts`, and any character actions to `menus` in `web/src/components/PlayerPanel.tsx`.
+4. Add a guide to `web/src/data/guides.ts`, and any character actions to `menus` in `web/src/components/CharacterMenu.tsx`.
+5. Give them a colour in `web/src/styles/tokens.css`. It tints the board whenever their Realm is on show.
 
 ## Adding a client event
 

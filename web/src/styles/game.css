@@ -1,0 +1,776 @@
+/* Fills the window on a computer: board in the middle, hand docked below, the table's
+   people and history down the side. Below 1000px it becomes one scrolling column. */
+.game {
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background:
+    radial-gradient(110% 85% at 35% 0%, color-mix(in oklab, var(--cloth) 85%, transparent), transparent 80%),
+    var(--ink);
+}
+
+.game__table {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-height: 52px;
+  padding: 6px 14px;
+  background: rgb(10 8 6 / 0.55);
+  border-bottom: 1px solid var(--gold-line);
+}
+
+.topbar .wordmark {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.topbar__room {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.topbar__room button {
+  padding: 0.35em 0.6em;
+  font-size: 0.8rem;
+}
+
+.topbar__center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.turn-status {
+  padding: 0.2em 0.7em;
+  border-radius: 999px;
+  border: 1px solid var(--gold-line);
+  font-family: var(--font-head);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.turn-status.is-on {
+  color: #241a0e;
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 14px rgb(236 208 140 / 0.45);
+}
+
+/* ---------- the Realm ---------- */
+
+.realm {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gold);
+  background: rgb(10 8 6 / 0.7);
+}
+
+.notice__actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.realm-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 12px;
+  background: color-mix(in oklab, var(--cloth) 72%, var(--ink));
+}
+
+.realm-header__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.realm-header__title h2 {
+  font-size: 1.15rem;
+}
+
+.stats {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat__value {
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--gold-bright);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat button {
+  width: 1.9rem;
+  padding: 0.25em 0;
+  font-size: 0.82rem;
+}
+
+.fate-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-left: auto;
+}
+
+.fate-bar__info {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.fate-bar__info strong {
+  font-family: var(--font-head);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.fate-bar button {
+  padding: 0.38em 0.7em;
+  font-size: 0.84rem;
+}
+
+.character-menu {
+  position: relative;
+  flex: none;
+  --avatar: 48px;
+}
+
+.character-menu__caret {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--ink-high);
+  border-color: var(--gold);
+  color: var(--gold-bright);
+  font-size: 0.72rem;
+  transition: transform 0.12s ease;
+}
+
+.character-menu__caret.is-open {
+  transform: rotate(180deg);
+}
+
+.character-menu__list {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  min-width: 230px;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  background: var(--ink-high);
+  box-shadow: var(--shadow);
+}
+
+.character-menu__list .label {
+  padding: 4px 8px 6px;
+}
+
+.character-menu__list button {
+  position: relative;
+  z-index: 1;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+}
+
+/* The four rows of a location are shared across the board, so action chips line up and
+   a row only takes the height its cards need. Spare height is split between the zones. */
+.board {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: auto minmax(min-content, 1fr) auto minmax(min-content, 1fr);
+  column-gap: 8px;
+}
+
+.location {
+  grid-row: span 4;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: subgrid;
+  row-gap: 5px;
+  padding: 7px;
+  background: color-mix(in oklab, var(--cloth) 52%, var(--ink));
+}
+
+.location.is-pawn {
+  border-color: var(--gold);
+  background: color-mix(in oklab, var(--cloth) 72%, var(--ink));
+  box-shadow: 0 0 18px rgb(201 164 92 / 0.22);
+}
+
+.location.is-locked {
+  background: color-mix(in oklab, var(--cloth) 24%, var(--ink));
+}
+
+.location__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 3px;
+  position: relative;
+  z-index: 1;
+}
+
+.location__head.can-move {
+  cursor: pointer;
+}
+
+.location__name {
+  min-width: 0;
+  font-family: var(--font-head);
+  font-weight: 700;
+  font-size: 0.86rem;
+  line-height: 1.1;
+}
+
+.location.is-pawn .location__name {
+  color: var(--gold-bright);
+}
+
+.location__lock {
+  color: var(--danger);
+  font-size: 0.82rem;
+}
+
+.pawn {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: none;
+  color: var(--gold-bright);
+  fill: var(--gold-bright);
+  stroke: none;
+}
+
+.location__head button {
+  margin-left: auto;
+  padding: 0.2em 0.5em;
+  font-size: 0.72rem;
+}
+
+.location__head button.is-on {
+  background: var(--danger-deep);
+  border-color: var(--danger);
+}
+
+.zone {
+  position: relative;
+  z-index: 1;
+  min-height: 56px;
+  padding: 5px;
+  display: flex;
+  border-radius: var(--radius-sm);
+  background: rgb(0 0 0 / 0.34);
+  box-shadow: inset 0 1px 6px rgb(0 0 0 / 0.55);
+  border: 1px solid transparent;
+}
+
+.zone.is-target {
+  cursor: pointer;
+  border: 1px dashed var(--gold-bright);
+  background: rgb(236 208 140 / 0.07);
+}
+
+.zone__label {
+  position: absolute;
+  top: 4px;
+  left: 7px;
+  pointer-events: none;
+  font-size: 0.62rem;
+  color: var(--faint);
+}
+
+.actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+}
+
+.location.is-locked .actions {
+  opacity: 0.45;
+}
+
+.chip {
+  padding: 0.14em 0.5em;
+  border-radius: 999px;
+  border: 1px solid var(--gold-line);
+  background: rgb(0 0 0 / 0.3);
+  color: var(--text);
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chip--top {
+  border-color: var(--gold);
+  color: var(--gold-bright);
+}
+
+.chip--blocked {
+  border-color: var(--danger);
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.actions__none {
+  font-size: 0.72rem;
+  color: var(--faint);
+}
+
+/* ---------- the dock ---------- */
+
+.dock {
+  min-width: 0;
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px 10px;
+  background: rgb(10 8 6 / 0.6);
+  border-top: 1px solid var(--gold-line);
+}
+
+.dock__piles {
+  flex: none;
+  width: 196px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.dock__piles .card-back {
+  width: 62px;
+  height: 87px;
+}
+
+.discard-peek {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.discard-peek strong {
+  font-family: var(--font-head);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.discard-peek__top {
+  flex-basis: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discard-peek button {
+  flex-basis: 100%;
+  padding: 0.32em 0.5em;
+  font-size: 0.78rem;
+}
+
+.dock__hand {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hand-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.hand-bar__info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.hand-bar__info strong {
+  font-family: var(--font-head);
+  font-weight: 600;
+  font-size: 0.98rem;
+  color: var(--text);
+}
+
+.hand-bar__controls {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.hand-bar__controls button {
+  padding: 0.4em 0.7em;
+  font-size: 0.85rem;
+}
+
+.hand {
+  min-height: var(--card-h);
+  padding-top: 9px;
+  margin-top: -9px;
+  --slot-w: var(--card-w);
+}
+
+.hand--hidden {
+  --slot-w: var(--card-w-sm);
+  min-height: var(--card-h-sm);
+}
+
+.hand__empty {
+  align-self: center;
+  font-size: 0.9rem;
+  color: var(--faint);
+}
+
+.fate-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.fate-panel__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.fate-panel__head strong {
+  font-family: var(--font-head);
+  font-weight: 600;
+  color: var(--gold-bright);
+}
+
+.fate-panel__head div {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.fate-panel__cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* ---------- the side column ---------- */
+
+.side {
+  grid-row: 1 / -1;
+  grid-column: 2;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 12px 10px 0;
+}
+
+.players {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.player {
+  --avatar: 34px;
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 5px;
+  text-align: left;
+  white-space: normal;
+  border-color: var(--gold-line-soft);
+  background: color-mix(in oklab, var(--cloth) 36%, var(--ink));
+}
+
+.player.is-focused {
+  border-color: var(--gold-bright);
+  background: color-mix(in oklab, var(--cloth) 62%, var(--ink));
+}
+
+.player__name {
+  display: block;
+  font-weight: 700;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.player__meta {
+  display: block;
+  font-size: 0.74rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.player__power {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--gold-bright);
+}
+
+.player__turn {
+  position: absolute;
+  left: -1px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--gold-bright);
+  box-shadow: 0 0 8px var(--gold-bright);
+}
+
+.side-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.side-panel h3 {
+  font-size: 0.82rem;
+}
+
+.side-panel__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+  z-index: 1;
+  font-size: 0.82rem;
+}
+
+.log-line {
+  padding: 2px 0;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.log-line.is-undo {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.log-line time {
+  margin-right: 5px;
+  color: var(--faint);
+  font-size: 0.72rem;
+}
+
+.chat-line {
+  padding: 2px 0;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.chat-line.is-system {
+  color: var(--muted);
+}
+
+.chat-line b {
+  font-weight: 700;
+}
+
+.chat-line.is-mine b {
+  color: var(--gold-bright);
+}
+
+.chat-line time {
+  margin-left: 5px;
+  color: var(--faint);
+  font-size: 0.7rem;
+}
+
+.chat {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 5px;
+}
+
+.chat input {
+  padding: 0.35em 0.5em;
+  font-size: 0.85rem;
+}
+
+.chat button {
+  padding: 0.35em 0.6em;
+  font-size: 0.82rem;
+}
+
+.side-panel__empty {
+  color: var(--faint);
+}
+
+/* ---------- smaller screens ---------- */
+
+/* a laptop browser window is often only 650-750px tall */
+@media (max-height: 820px) and (min-width: 1001px) {
+  :root {
+    --card-w: 112px;
+    --card-h: 152px;
+  }
+
+  .card--md {
+    --text-size: 0.63rem;
+  }
+
+  .realm {
+    padding-block: 6px;
+    gap: 6px;
+  }
+
+  .realm-header {
+    padding-block: 5px;
+  }
+
+  .character-menu {
+    --avatar: 40px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .game {
+    height: auto;
+    min-height: 100dvh;
+    display: block;
+  }
+
+  .game__table {
+    display: block;
+  }
+
+  .realm {
+    overflow: visible;
+  }
+
+  .board {
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    grid-auto-columns: min(82vw, 290px);
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    padding-bottom: 6px;
+  }
+
+  .location {
+    scroll-snap-align: start;
+  }
+
+  .dock {
+    flex-wrap: wrap;
+  }
+
+  .dock__piles {
+    width: 100%;
+  }
+
+  .fan.hand {
+    overflow-x: auto;
+  }
+
+  .fan.hand .slot {
+    flex: none;
+  }
+
+  .side {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px;
+  }
+
+  .side-panel__scroll {
+    max-height: 220px;
+  }
+
+  .zone {
+    min-height: 72px;
+  }
+
+  .topbar__center {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+}

@@ -1,0 +1,273 @@
+.card {
+  --w: var(--card-w);
+  --h: var(--card-h);
+  --type: #5a4a38;
+  --text-size: 0.71rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: var(--w);
+  height: var(--h);
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgb(0 0 0 / 0.55);
+  background: linear-gradient(165deg, var(--parchment), var(--parchment-deep));
+  color: var(--parchment-ink);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.5), inset 0 0 18px rgb(120 90 40 / 0.14);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.card--sm {
+  --w: var(--card-w-sm);
+  --h: var(--card-h-sm);
+  --text-size: 0.62rem;
+}
+
+.card--lg {
+  --w: 280px;
+  --h: auto;
+  --text-size: 1.02rem;
+  min-height: 200px;
+}
+
+.card.is-clickable {
+  cursor: pointer;
+}
+
+.card.is-locked {
+  filter: saturate(0.55) brightness(0.78);
+}
+
+.card.is-active {
+  box-shadow: 0 0 0 2px var(--gold-bright), 0 0 16px rgb(236 208 140 / 0.55);
+}
+
+/* each card type has its own ribbon */
+.card[data-type="Ally"] { --type: #7c2b2b; }
+.card[data-type="Item"] { --type: #2c5d63; }
+.card[data-type="Effect"] { --type: #58407c; }
+.card[data-type="Condition"] { --type: #2f3b66; }
+.card[data-type="Hero"] { --type: #8a6516; }
+.card[data-type="Curse"] { --type: #39583a; }
+.card[data-type="Guardian"] { --type: #4b5568; }
+.card[data-type="Prince"] { --type: #8a6516; }
+
+.card__ribbon {
+  flex: none;
+  padding: 0.28em 2em;
+  background: var(--type);
+  color: #f8eedb;
+  font-size: max(0.6rem, calc(var(--text-size) * 0.86));
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1.15;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.card__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+  padding: 0.5em 0.55em 1.7em;
+  font-size: var(--text-size);
+  overflow: hidden;
+  /* long card text fades out here; the hover preview has all of it */
+  mask-image: linear-gradient(#000 calc(100% - 1.9em), transparent calc(100% - 0.6em));
+}
+
+.card__name {
+  font-family: var(--font-head);
+  font-weight: 700;
+  font-size: 1.14em;
+  line-height: 1.12;
+  text-align: center;
+}
+
+.card__text {
+  line-height: 1.2;
+  text-align: center;
+  color: var(--parchment-muted);
+  font-weight: 500;
+}
+
+.card--lg .card__body {
+  padding-bottom: 2.6em;
+  mask-image: none;
+}
+
+.card__cost,
+.card__strength,
+.card__adjust {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  min-width: 1.5em;
+  height: 1.5em;
+  padding: 0 0.25em;
+  font-size: max(0.72rem, var(--text-size));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  border-radius: 999px;
+}
+
+.card__cost {
+  top: 2px;
+  left: 2px;
+  color: #2a1e0c;
+  background: radial-gradient(circle at 35% 30%, #f6e2ae, var(--gold) 70%);
+  border: 1px solid #7c5c23;
+}
+
+.card__strength {
+  bottom: 4px;
+  left: 4px;
+  color: #f8eedb;
+  background: #2f261d;
+  border: 1px solid var(--gold);
+  border-radius: 4px 4px 10px 10px;
+}
+
+.card__adjust {
+  bottom: 4px;
+  right: 4px;
+  color: #f8eedb;
+  background: #2f261d;
+  border: 1px solid #000;
+}
+
+.card__adjust.is-up { color: #b9e6a4; }
+.card__adjust.is-down { color: #ffb0a8; }
+
+.card__lock {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 1.45rem;
+  height: 1.3rem;
+  padding: 0;
+  font-size: 0.72rem;
+  color: #f8eedb;
+  background: rgb(0 0 0 / 0.28);
+  border-color: rgb(255 255 255 / 0.25);
+}
+
+.card__lock.is-on {
+  background: var(--danger-deep);
+  border-color: var(--danger);
+}
+
+.card__stepper {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.card__stepper .card__adjust {
+  position: static;
+}
+
+.card__stepper button {
+  display: grid;
+  place-items: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  color: #f8eedb;
+  background: #2f261d;
+  border-color: #000;
+  font-size: 0.8rem;
+}
+
+.card__stepper button:hover:not(:disabled) {
+  background: var(--type);
+  border-color: #000;
+}
+
+/* backs and piles */
+
+.card-back {
+  display: block;
+  flex: none;
+  overflow: hidden;
+  width: var(--card-w-sm);
+  height: var(--card-h-sm);
+  border-radius: 8px;
+  border: 1px solid rgb(0 0 0 / 0.55);
+  background: color-mix(in oklab, var(--cloth) 70%, var(--ink));
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.5);
+  user-select: none;
+}
+
+.card-back img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+
+/* A row of cards. Each slot may shrink while its card keeps its size, so a crowded
+   row overlaps into a fan by itself. The last card always shows in full. */
+.fan {
+  display: flex;
+  min-width: 0;
+}
+
+.slot {
+  position: relative;
+  flex: 0 1 calc(var(--slot-w, var(--card-w)) + 8px);
+  min-width: 30px;
+}
+
+.slot:last-child {
+  flex: none;
+  width: var(--slot-w, var(--card-w));
+}
+
+.slot:hover {
+  z-index: 5;
+}
+
+.slot:hover > .card.is-clickable {
+  transform: translateY(-5px);
+}
+
+.fan--sm {
+  --slot-w: var(--card-w-sm);
+}
+
+.hand .slot.is-selected {
+  z-index: 4;
+}
+
+.hand .slot.is-selected > .card {
+  transform: translateY(-9px);
+  box-shadow: 0 0 0 2px var(--gold-bright), 0 0 16px rgb(236 208 140 / 0.55);
+}
+
+/* hovering any card shows a readable copy over the sidebar */
+.card-preview {
+  display: none;
+}
+
+@media (hover: hover) {
+  .card-preview {
+    display: block;
+    position: fixed;
+    top: 66px;
+    right: 14px;
+    z-index: 400;
+    pointer-events: none;
+    filter: drop-shadow(0 12px 30px rgb(0 0 0 / 0.75));
+  }
+}

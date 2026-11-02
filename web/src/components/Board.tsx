@@ -1,5 +1,7 @@
+import { cx } from "../cx";
 import type { Card, LocationIndex, PublicPlayer } from "../protocol";
 import { CardFace } from "./CardFace";
+import { Icon } from "./Icon";
 import { LocationActions } from "./LocationActions";
 
 export type BoardHandlers = {
@@ -20,6 +22,7 @@ type BoardProps = BoardHandlers & {
   canEdit: boolean; //strength and locks on your own cards, whoever's turn it is
   placingFate: boolean;
   movingRow: "top" | "bottom" | null;
+  movingCardId: string | null;
   selectedCount: number;
 };
 
@@ -32,42 +35,20 @@ function bottomTitle({viewingSelf, canAct, locked, moving, selectedCount}: {view
 }
 
 export function Board(props: BoardProps) {
-  const {player, viewingSelf, canAct, canEdit, placingFate, movingRow, selectedCount} = props;
+  const {player, viewingSelf, canAct, canEdit, placingFate, movingRow, movingCardId, selectedCount} = props;
   const canSetPawn = viewingSelf && canAct;
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-        gap: 12,
-      }}
-    >
+    <div className="board">
       {player.board.locations.map((loc, index) => {
         const i = index as LocationIndex;
         const isPawnHere = player.board.moverAt === i;
         const dropping = movingRow === "bottom" || (viewingSelf && canAct && selectedCount === 1);
 
         return (
-          <div
-            key={loc.id}
-            style={{
-              border: "1px solid #475569",
-              borderRadius: 10,
-              padding: 10,
-              background: "#0f172a",
-            }}
-          >
+          <div key={loc.id} className={cx("location frame", isPawnHere && "is-pawn", loc.locked && "is-locked")}>
             <div
-              style={{
-                fontWeight: 700,
-                marginBottom: 6,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                cursor: canSetPawn ? "pointer" : "default",
-                color: isPawnHere ? "#facc15" : undefined, // highlight pawn row
-              }}
+              className={cx("location__head", canSetPawn && "can-move")}
               title={
                 isPawnHere ? "Pawn is here"
                 : canSetPawn ? "Click to move pawn here"
@@ -75,24 +56,17 @@ export function Board(props: BoardProps) {
               }
               onClick={() => { if (canSetPawn) props.onPawn(i); }}
             >
-              {/* tiny pawn dot when active */}
-              {isPawnHere && <span style={{ fontSize: 12 }}>●</span>}
-              <span>{loc.name}{loc.locked ? "🔒" : ""}</span>
+              {isPawnHere && <Icon name="pawn" className="pawn" />}
+              <span className="location__name">{loc.name}</span>
+              {loc.locked && <span className="location__lock" title="Location locked"><Icon name="lock" /></span>}
               {canSetPawn && (
                 <button
+                  className={cx(loc.locked && "is-on")}
                   onClick={(e) => {
                     e.stopPropagation();
                     props.onToggleLocationLock(i, !loc.locked);
                   }}
                   title={loc.locked ? "Unlock this location" : "Lock this location"}
-                  style={{
-                    marginLeft: "auto",
-                    fontSize: 12, padding: "2px 6px",
-                    borderRadius: 6, border: "1px solid #334155",
-                    background: loc.locked ? "#7f1d1d" : "#1e293b",
-                    color: "#e5e7eb",
-                    cursor: "pointer",
-                  }}
                 >
                   {loc.locked ? "Unlock" : "Lock"}
                 </button>
@@ -100,88 +74,57 @@ export function Board(props: BoardProps) {
             </div>
 
             {/* Top (public) */}
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Top</div>
-              <div
-                data-testid={`top-${i}`}
-                onClick={() => props.onTopZone(i)}
-                title={placingFate ? "Click to place fate card here (Top)" : undefined}
-                style={{
-                  display: "flex",
-                  gap: 6,
-                  flexWrap: "wrap",
-                  border: (placingFate || movingRow === "top") ? "1px dashed #3b82f6" : "1px solid #475569",
-                  borderRadius: 8,
-                  padding: 6,
-                  cursor: (placingFate || movingRow === "top") ? "pointer" : "default",
-                  background: "#111827",
-                  minHeight: 220,
-                }}
-              >
-                {loc.top.length === 0 ? (
-                  <span style={{ opacity: 0.6, fontSize: 12 }}>empty</span>
-                ) : (
-                  loc.top.map((c) => (
+            <div
+              data-testid={`top-${i}`}
+              className={cx("zone", (placingFate || movingRow === "top") && "is-target")}
+              onClick={() => props.onTopZone(i)}
+              title={placingFate ? "Click to place fate card here (Top)" : undefined}
+            >
+              {loc.top.length === 0 && <span className="zone__label label">Top</span>}
+              <div className="fan">
+                {loc.top.map((c) => (
+                  <div key={c.id} className="slot">
                     <CardFace
-                      key={c.id}
                       card={c}
-                      showCost={false}
                       locked={c.locked}
+                      active={c.id === movingCardId}
                       onClick={() => props.onTopCard(c, i)}
                       canLock={canEdit}
                       onToggleLock={(next) => props.onToggleCardLock(c, next)}
                       canAdjustStrength={canEdit && !c.locked}
                       onAdjustStrength={(delta) => props.onAdjustStrength(c, delta)}
-                      size="md"
                     />
-                  ))
-                )}
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/*Location actions */}
-            <LocationActions
-              actions={loc.actions}
-              topSlots={loc.topSlots}
-              hasTopCover={loc.top.length > 0}
-              locked={loc.locked}
-              isActive={viewingSelf && canAct && !loc.locked}
-            />
+            <LocationActions actions={loc.actions} topSlots={loc.topSlots} hasTopCover={loc.top.length > 0} />
 
             {/* Bottom (your plays) */}
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Bottom</div>
             <div
               data-testid={`bottom-${i}`}
+              className={cx("zone", dropping && "is-target")}
               onClick={() => props.onBottomZone(i)}
-              style={{
-                border: dropping ? "1px dashed #3b82f6" : "1px solid #475569",
-                borderRadius: 8,
-                padding: 6,
-                background: "#111827",
-                cursor: dropping ? "pointer" : "default",
-                minHeight: 220,
-              }}
               title={bottomTitle({viewingSelf, canAct, locked: loc.locked, moving: movingRow === "bottom", selectedCount})}
             >
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {loc.bottom.length === 0 ? (
-                  <span style={{ opacity: 0.6, fontSize: 12 }}>empty</span>
-                ) : (
-                  loc.bottom.map(c => (
+              {loc.bottom.length === 0 && <span className="zone__label label">Bottom</span>}
+              <div className="fan">
+                {loc.bottom.map((c) => (
+                  <div key={c.id} className="slot">
                     <CardFace
-                      key={c.id}
                       card={c}
                       locked={c.locked}
+                      active={c.id === movingCardId}
                       onClick={() => props.onBottomCard(c, i)}
                       // show lock/± only if it's your turn AND you're viewing your own board
                       canLock={viewingSelf && canAct}
                       onToggleLock={(next) => props.onToggleCardLock(c, next)}
                       canAdjustStrength={viewingSelf && canAct && !c.locked}
                       onAdjustStrength={(delta) => props.onAdjustStrength(c, delta)}
-                      size="md"
                     />
-                  ))
-                )}
+                  </div>
+                ))}
               </div>
             </div>
           </div>

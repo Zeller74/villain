@@ -22,10 +22,10 @@ export function FateDiscardModal({
   const selected = cards.find(c => c.id === selectedId) ?? null;
 
   return (
-    <Modal onClose={onClose} width="min(720px, 90vw)">
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <Modal onClose={onClose}>
+      <div className="modal__head">
         <strong>Fate discard — {targetName} ({cards.length})</strong>
-        <span style={{ marginLeft: "auto" }} />
+        <span className="modal__spacer" />
         {canAct && (
           <>
             <button
@@ -47,37 +47,22 @@ export function FateDiscardModal({
         <button onClick={onClose}>Close</button>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
-          gap: 10,
-          marginTop: 12,
-        }}
-      >
-        {cards.length === 0 ? (
-          <div style={{ opacity: 0.7 }}>Empty</div>
-        ) : cards.map((c, idx) => (
-          <div
-            key={c.id}
-            onClick={() => setSelectedId(c.id)}
-            title="Select this card"
-            style={{
-              cursor: "pointer",
-              border: c.id === selectedId ? "2px solid #3b82f6" : "1px solid #475569",
-              borderRadius: 8, background: "#1f2937", color: "#f1f5f9",
-              minWidth: 100, height: 140, padding: 8,
-              position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <div style={{ position: "absolute", top: 6, left: 8, fontSize: 11, opacity: 0.6 }}>
-              #{cards.length - idx}
-            </div>
-            {/* Fate cards: no cost, no lock/± */}
-            <CardFace card={c} showCost={false} size="sm" />
-          </div>
-        ))}
-      </div>
+      {cards.length === 0 ? (
+        <div className="modal__empty">Empty</div>
+      ) : (
+        <div className="modal__grid">
+          {cards.map((c) => (
+            <CardFace
+              key={c.id}
+              card={c}
+              size="sm"
+              active={c.id === selectedId}
+              onClick={() => setSelectedId(c.id)}
+              title="Select this card"
+            />
+          ))}
+        </div>
+      )}
     </Modal>
   );
 }

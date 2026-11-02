@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import type { ConnectionStatus } from "../useGameClient";
 
 async function copyText(text: string) {
   try {
@@ -16,7 +17,19 @@ async function copyText(text: string) {
   }
 }
 
-export function RoomHeader({ roomId, onLeave }: { roomId: string; onLeave: () => void }) {
+export function RoomHeader({
+  roomId,
+  status,
+  onLeave,
+  center,
+  actions,
+}: {
+  roomId: string;
+  status: ConnectionStatus;
+  onLeave: () => void;
+  center?: ReactNode;
+  actions?: ReactNode;
+}) {
   const [copied, setCopied] = useState(false);
 
   const copyInviteLink = async () => {
@@ -29,13 +42,20 @@ export function RoomHeader({ roomId, onLeave }: { roomId: string; onLeave: () =>
   };
 
   return (
-    <p style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <strong>Room:</strong> <code>{roomId}</code>
-      <button onClick={copyInviteLink} title="Copy invite link">
-        {copied ? "Copied!" : "Copy Link"}
-      </button>
-      <span style={{ marginLeft: "auto" }} />
-      <button onClick={onLeave}>Leave Room</button>
-    </p>
+    <header className="topbar">
+      <span className="wordmark">Villainous</span>
+      <div className="topbar__room">
+        <span className="status-dot" data-status={status} title={`Socket: ${status}`} />
+        <span>Room <code>{roomId}</code></span>
+        <button onClick={copyInviteLink} title="Copy invite link">
+          {copied ? "Copied!" : "Copy Link"}
+        </button>
+      </div>
+      <div className="topbar__center">{center}</div>
+      <div className="topbar__actions">
+        {actions}
+        <button onClick={onLeave}>Leave Room</button>
+      </div>
+    </header>
   );
 }

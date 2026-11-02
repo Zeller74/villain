@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type { PublicPlayer } from "../protocol";
-import { panel } from "../theme";
 import { PlayerPickerModal } from "./PlayerPickerModal";
 
 export function FateBar({
@@ -27,37 +26,21 @@ export function FateBar({
   const disabledReason = !canAct ? "Not your turn" : (!viewingSelf ? "Switch to your board to act" : undefined);
 
   return (
-    <div
-      style={{
-        ...panel,
-        padding: 10,
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        marginBottom: 12,
-      }}
-    >
-      {/* LEFT: info */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div className="fate-bar">
+      <div className="fate-bar__info">
         <strong>Fate</strong>
-        <span style={{ opacity: 0.85 }}>Deck: {fateDeck}</span>
-        <span style={{ opacity: 0.85 }}>· Discard: {fateDiscard}</span>
-        {!viewingSelf && (
-          <span style={{ opacity: 0.6 }}>· Target: {focusPlayer.name}</span>
-        )}
+        <span>Deck: {fateDeck}</span>
+        <span>· Discard: {fateDiscard}</span>
+        {!viewingSelf && <span>· Target: {focusPlayer.name}</span>}
       </div>
 
-      <span style={{marginLeft: "auto"}}/>
-
-      <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-        <button
-          onClick={() => setPickOpen(true)}
-          disabled={!canFate}
-          title={canFate ? "Choose a player to Fate" : "Your turn required"}
-        >
-          Fate…
-        </button>
-      </div>
+      <button
+        onClick={() => setPickOpen(true)}
+        disabled={!canFate}
+        title={canFate ? "Choose a player to Fate" : "Your turn required"}
+      >
+        Fate…
+      </button>
       {pickOpen && (
         <PlayerPickerModal
           title="Choose a player to Fate"

@@ -183,6 +183,33 @@ describe("what the board shows", () => {
   });
 });
 
+describe("the hover preview", () => {
+  const preview = () => document.querySelector(".card-preview");
+
+  it("shows a card while it is hovered", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+    fireEvent.mouseEnter(boardCard("Smee").closest(".card")!);
+    expect(preview()?.textContent).toContain("Smee");
+    fireEvent.mouseLeave(boardCard("Smee").closest(".card")!);
+    expect(preview()).toBeNull();
+  });
+
+  it("goes away if the hovered card leaves play", () => {
+    enterGame(state({board: boardWith([card("Smee")])}));
+    fireEvent.mouseEnter(boardCard("Smee").closest(".card")!);
+    socket.receive("room:state", state());
+    expect(preview()).toBeNull();
+  });
+});
+
+describe("the lobby", () => {
+  it("picks a villain from the portraits", () => {
+    enterGame(state({}, {phase: "lobby", activePlayerId: null}));
+    fireEvent.click(document.querySelector('button[data-villain="prince"]')!);
+    expect(socket.sentOf("lobby:chooseCharacter")[0]!.payload).toEqual({characterId: "prince"});
+  });
+});
+
 describe("the character menu", () => {
   it("says so when a villain has no actions", () => {
     enterGame(state({characterId: "prince"}));
@@ -206,7 +233,7 @@ describe("fate", () => {
   it("restores an open fate from the server, on the target's board", () => {
     enterGame(state(), [], fate);
     expect(screen.getByText("Fate: choose a card to play")).toBeTruthy();
-    expect(screen.getByText("them's hand")).toBeTruthy();
+    expect(screen.getByText(/Viewing: them/)).toBeTruthy();
   });
 
   it("can be cancelled while placing, which the old banner could not do", () => {
@@ -366,7 +393,7 @@ describe("losing the connection", () => {
 describe("the end of a game", () => {
   it("names the winners and lets the owner return to the lobby", () => {
     enterGame(state({won: true}, {phase: "ended", activePlayerId: null}));
-    expect(screen.getByText("🏆 me")).toBeTruthy();
+    expect(screen.getByText("Winner: me")).toBeTruthy();
     fireEvent.click(screen.getByText("Back to lobby"));
     expect(socket.sentOf("game:backToLobby")).toHaveLength(1);
   });

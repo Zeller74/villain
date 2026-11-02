@@ -1,0 +1,50 @@
+/* The look comes from the villain card backs: book cloth, gold foil line art, parchment. */
+:root {
+  color-scheme: dark;
+
+  --ink: #0f0c0a;
+  --ink-raised: #1a1512;
+  --ink-high: #261f19;
+
+  --text: #f0e7d5;
+  --muted: #bfb199;
+  --faint: #928570;
+
+  --gold: #c9a45c;
+  --gold-bright: #ecd08c;
+  --gold-line: rgb(201 164 92 / 0.34);
+  --gold-line-soft: rgb(201 164 92 / 0.16);
+
+  --parchment: #f0e6d0;
+  --parchment-deep: #e0d2b4;
+  --parchment-ink: #2b2118;
+  --parchment-muted: #5c4c3a;
+
+  --danger: #e0655f;
+  --danger-deep: #6d2320;
+  --good: #8fbf7a;
+
+  --font-title: "Cinzel Decorative", "Cinzel", Georgia, serif;
+  --font-head: "Cinzel", Georgia, serif;
+  --font-body: "Alegreya Sans", system-ui, sans-serif;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+
+  --card-w: 132px;
+  --card-h: 184px;
+  --card-w-sm: 108px;
+  --card-h-sm: 150px;
+
+  /* the colour of the Realm on show; each villain below replaces it */
+  --cloth: #3a3128;
+}
+
+[data-villain="captain"] { --cloth: #6e2a36; }
+[data-villain="prince"] { --cloth: #7a4318; }
+[data-villain="lady"] { --cloth: #46555f; }
+[data-villain="mother"] { --cloth: #6f4f33; }
+[data-villain="maleficent"] { --cloth: #35502f; }
+[data-villain="lotso"] { --cloth: #8a2f6b; }
+[data-villain="pete"] { --cloth: #34506e; }

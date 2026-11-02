@@ -1,42 +1,21 @@
-import type { CSSProperties, ReactNode } from "react";
-import { panel } from "../theme";
+import type { ReactNode } from "react";
+import { cx } from "../cx";
 
 type ModalProps = {
   onClose: () => void;
-  width: string;
-  maxHeight?: string;
-  zIndex?: number;
-  style?: CSSProperties;
+  size?: "narrow" | "medium" | "wide";
+  onTop?: boolean;
+  boxClassName?: string;
   children: ReactNode;
 };
 
 //dimmed backdrop and dialog box. Clicking the backdrop closes it
-export function Modal({ onClose, width, maxHeight = "75vh", zIndex = 100, style, children }: ModalProps) {
+export function Modal({ onClose, size, onTop = false, boxClassName, children }: ModalProps) {
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,.55)",
-        display: "grid",
-        placeItems: "center",
-        zIndex,
-      }}
-    >
+    <div role="dialog" aria-modal="true" className={cx("modal", onTop && "modal--top")} onClick={onClose}>
       <div
+        className={cx("modal__box frame", size && `modal__box--${size}`, boxClassName)}
         onClick={(e) => e.stopPropagation()}
-        style={{
-          ...panel,
-          width,
-          maxHeight,
-          overflowY: "auto",
-          padding: 12,
-          boxShadow: "0 12px 30px rgba(0,0,0,.45)",
-          ...style,
-        }}
       >
         {children}
       </div>
