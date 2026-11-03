@@ -2,7 +2,7 @@
   --w: var(--card-w);
   --h: var(--card-h);
   --type: #5a4a38;
-  --text-size: 0.71rem;
+  --text-size: calc(var(--w) * 0.086);
   --zoom-size: 1.45rem;
   position: relative;
   /* keeps a card's own controls inside it, so a fanned card's buttons cannot sit on the next one */

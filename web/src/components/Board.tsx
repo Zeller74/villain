@@ -47,6 +47,13 @@ export function Board(props: BoardProps) {
 
         return (
           <div key={loc.id} className={cx("location frame", isPawnHere && "is-pawn", loc.locked && "is-locked")}>
+            <img
+              className="location__art"
+              src={`/locations/${player.characterId}/${loc.id}.webp`}
+              alt=""
+              draggable={false}
+              onError={(e) => { e.currentTarget.hidden = true; }}
+            />
             <div
               className={cx("location__head", canSetPawn && "can-move")}
               title={
@@ -80,7 +87,7 @@ export function Board(props: BoardProps) {
               onClick={() => props.onTopZone(i)}
               title={placingFate ? "Click to place fate card here (Top)" : undefined}
             >
-              <div className="zone__art" />
+              {loc.top.length === 0 && <span className="zone__label label">Top</span>}
               <div className="fan">
                 {loc.top.map((c) => (
                   <div key={c.id} className="slot">

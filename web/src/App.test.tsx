@@ -310,23 +310,30 @@ describe("zooming a card", () => {
   });
 });
 
-describe("the printed board", () => {
-  it("puts a location's art behind its top zone, and leaves the bottom zone plain", () => {
-    enterGame(state());
-    expect(screen.getByTestId("top-2").querySelector(".zone__art")).not.toBeNull();
-    expect(screen.getByTestId("bottom-2").querySelector(".zone__art")).toBeNull();
+describe("the location paintings", () => {
+  const art = (at: number) => screen.getByTestId(`top-${at}`).closest(".location")!.querySelector<HTMLImageElement>(".location__art");
+
+  it("shows each location's own painting", () => {
+    enterGame(state({characterId: "captain"}));
+    expect(art(0)?.getAttribute("src")).toBe("/locations/captain/L1.webp");
+    expect(art(3)?.getAttribute("src")).toBe("/locations/captain/L4.webp");
   });
 
-  it("shows the board of the villain being looked at", () => {
+  it("follows the villain being looked at", () => {
     enterGame(state({characterId: "captain"}, {}, {characterId: "prince"}));
-    expect(document.querySelector(".game")?.getAttribute("data-villain")).toBe("captain");
     fireEvent.click(screen.getByText("them"));
-    expect(document.querySelector(".game")?.getAttribute("data-villain")).toBe("prince");
+    expect(art(1)?.getAttribute("src")).toBe("/locations/prince/L2.webp");
   });
 
-  it("still places a hero when the art is clicked", () => {
+  it("leaves a plain panel when a painting is missing", () => {
+    enterGame(state());
+    fireEvent.error(art(0)!);
+    expect(art(0)?.hidden).toBe(true);
+  });
+
+  it("still places a hero in the zone over the painting", () => {
     enterGame(state(), [], {kind: "fate", targetId: ME, targetName: ME, cards: [card("Wendy", {type: "Hero"})], chosenId: "Wendy"});
-    fireEvent.click(screen.getByTestId("top-2").querySelector(".zone__art")!);
+    fireEvent.click(screen.getByTestId("top-2"));
     expect(socket.sentOf("fate:placeSelected")[0]!.payload).toEqual({locationIndex: 2});
   });
 });

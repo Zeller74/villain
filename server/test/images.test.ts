@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { captain } from "../src/data/characters/captain";
@@ -23,11 +23,8 @@ describe("images", () => {
     expect(missing).toEqual([]);
   });
 
-  it("has every villain's board, with a token pointing at it", () => {
-    const tokens = readFileSync(join(__dirname, "../../web/src/styles/tokens.css"), "utf8");
-    for (const {id} of VILLAINS) {
-      expect(inPublic(`boards/${id}.webp`)).toBe(true);
-      expect(tokens).toContain(`--board: url("/boards/${id}.webp")`);
-    }
+  it("has a painting for every location", () => {
+    const missing = VILLAINS.flatMap(v => v.locations.map((_, i) => `locations/${v.id}/L${i + 1}.webp`)).filter(path => !inPublic(path));
+    expect(missing).toEqual([]);
   });
 });

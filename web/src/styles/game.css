@@ -85,6 +85,7 @@
 /* ---------- the Realm ---------- */
 
 .realm {
+  grid-area: 1 / 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -92,6 +93,19 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* float over the join between board and hand, so that picking up a card moves nothing */
+.notices {
+  grid-area: 1 / 1;
+  align-self: end;
+  justify-self: center;
+  z-index: 20;
+  width: min(640px, 100%);
+  margin-bottom: -18px;
+  display: grid;
+  gap: 6px;
+  pointer-events: none;
 }
 
 .notice {
@@ -102,7 +116,9 @@
   padding: 7px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--gold);
-  background: rgb(10 8 6 / 0.7);
+  background: rgb(10 8 6 / 0.94);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
 }
 
 .notice__actions {
@@ -236,14 +252,13 @@
 }
 
 /* The four rows of a location are shared across the board, so action chips line up and
-   a row only takes the height its cards need. Spare height goes mostly to the top zones,
-   which are about as tall as they are wide when the printed tile fills them. */
+   a row only takes the height its cards need. Spare height is split between the zones. */
 .board {
   flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: auto minmax(min-content, 1.25fr) auto minmax(min-content, 1fr);
+  grid-template-rows: auto minmax(min-content, 1fr) auto minmax(min-content, 1fr);
   column-gap: 8px;
 }
 
@@ -256,6 +271,25 @@
   row-gap: 5px;
   padding: 7px;
   background: color-mix(in oklab, var(--cloth) 52%, var(--ink));
+}
+
+/* the location's painting fills its column, dimmed so the cards stay the brightest thing on it */
+.location__art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  filter: brightness(0.76) saturate(0.95);
+}
+
+.location.is-pawn .location__art {
+  filter: brightness(0.92);
+}
+
+.location.is-locked .location__art {
+  filter: saturate(0.3) brightness(0.38);
 }
 
 .location.is-pawn {
@@ -273,7 +307,10 @@
   align-items: center;
   gap: 6px;
   min-height: 26px;
-  padding: 0 3px;
+  margin: -7px -7px 0;
+  padding: 6px 10px 5px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: rgb(0 0 0 / 0.55);
   position: relative;
   z-index: 1;
 }
@@ -326,40 +363,9 @@
   padding: 5px;
   display: flex;
   border-radius: var(--radius-sm);
-  background: rgb(0 0 0 / 0.34);
-  box-shadow: inset 0 1px 6px rgb(0 0 0 / 0.55);
-  border: 1px solid transparent;
-}
-
-/* the location's tile from the printed board, under the cards. A scan holds all four tiles in
-   a strip, so this shows one part of it, filling the zone whatever shape the zone is */
-.zone__art {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  overflow: hidden;
-  border-radius: inherit;
-  container-type: size;
-}
-
-.zone__art::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  translate: -50% -50%;
-  width: max(100cqw, 100cqh * 1.023);
-  aspect-ratio: 1.023;
-  background: var(--board, none) var(--tile-x) 28.5% / 510% auto no-repeat;
-}
-
-.location:nth-child(1) { --tile-x: 21%; }
-.location:nth-child(2) { --tile-x: 46.9%; }
-.location:nth-child(3) { --tile-x: 72.8%; }
-.location:nth-child(4) { --tile-x: 98.6%; }
-
-.location.is-locked .zone__art {
-  filter: saturate(0.35) brightness(0.55);
+  background: rgb(0 0 0 / 0.2);
+  box-shadow: inset 0 1px 6px rgb(0 0 0 / 0.4);
+  border: 1px solid rgb(255 255 255 / 0.1);
 }
 
 .zone.is-target {
@@ -374,7 +380,8 @@
   left: 7px;
   pointer-events: none;
   font-size: 0.62rem;
-  color: var(--faint);
+  color: rgb(255 255 255 / 0.7);
+  text-shadow: 0 1px 3px #000;
 }
 
 .actions {
@@ -396,7 +403,7 @@
   padding: 0.14em 0.5em;
   border-radius: 999px;
   border: 1px solid var(--gold-line);
-  background: rgb(0 0 0 / 0.3);
+  background: rgb(0 0 0 / 0.62);
   color: var(--text);
   font-size: 0.7rem;
   font-weight: 500;
@@ -422,6 +429,7 @@
 /* ---------- the dock ---------- */
 
 .dock {
+  grid-area: 2 / 1;
   min-width: 0;
   display: flex;
   gap: 12px;
@@ -719,17 +727,73 @@
 
 /* ---------- smaller screens ---------- */
 
+/* Heroes, Allies and the hand are three rows of cards sharing the height of the window, and
+   --card-room is everything else on screen. On a short window the hand runs off the bottom
+   edge, and a hovered card lifts into view. */
+@media (min-width: 1001px) {
+  :root {
+    --card-room: 288px;
+    --card-h: clamp(150px, (100dvh - var(--card-room)) / 3, 300px);
+    --card-w: calc(var(--card-h) * 0.7065);
+    /* enough of the hand always stays on screen to reach it */
+    --hand-lift: clamp(0px, var(--card-room) + 3 * var(--card-h) - 100dvh, var(--card-h) - 56px);
+  }
+
+  .game {
+    overflow: hidden;
+  }
+
+  .dock {
+    position: relative;
+    z-index: 2;
+    margin-bottom: calc(-1 * var(--hand-lift));
+  }
+
+  .hand .slot:hover > .card {
+    transform: translateY(calc(-5px - var(--hand-lift)));
+  }
+}
+
+/* below this the Realm's controls take two lines */
+@media (max-width: 1300px) and (min-width: 1001px) {
+  :root {
+    --card-room: 324px;
+  }
+}
+
+/* the very shortest windows */
+@media (max-height: 640px) and (min-width: 1001px) {
+  :root {
+    --card-h: 132px;
+  }
+}
+
+/* keeps the Realm's controls on one line for as long as possible, which leaves the cards more room */
+@media (max-width: 1400px) and (min-width: 1001px) {
+  .realm-header {
+    gap: 6px 10px;
+  }
+
+  .realm-header__title h2 {
+    font-size: 1rem;
+  }
+
+  .stats {
+    gap: 9px;
+  }
+
+  .fate-bar {
+    gap: 5px;
+  }
+
+  .fate-bar button {
+    padding: 0.3em 0.5em;
+    font-size: 0.76rem;
+  }
+}
+
 /* a laptop browser window is often only 650-750px tall */
 @media (max-height: 820px) and (min-width: 1001px) {
-  :root {
-    --card-w: 112px;
-    --card-h: 152px;
-  }
-
-  .card--md {
-    --text-size: 0.63rem;
-  }
-
   .realm {
     padding-block: 6px;
     gap: 6px;
@@ -749,6 +813,11 @@
     height: auto;
     min-height: 100dvh;
     display: block;
+  }
+
+  .notices {
+    width: auto;
+    margin: 8px 12px 0;
   }
 
   .game__table {

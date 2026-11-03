@@ -202,7 +202,7 @@ export function GameScreen({ client, room }: { client: GameClient; room: RoomSta
         />
 
         <main className="game__table">
-          <section className="realm">
+          <div className="notices">
             {room.game.phase === "ended" && (
               <div className="notice">
                 <strong>Game over.</strong>
@@ -237,7 +237,9 @@ export function GameScreen({ client, room }: { client: GameClient; room: RoomSta
             )}
 
             {placingCard && <FatePlaceBanner label={placingCard.label} onCancel={() => call("fate:cancel", {})} />}
+          </div>
 
+          <section className="realm">
             {focusPlayer && (
               <>
                 <RealmHeader

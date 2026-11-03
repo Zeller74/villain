@@ -16,14 +16,14 @@ npm run dev -w web      # http://localhost:5173
 
 To play against yourself, open a second browser tab. Each tab is its own player, keeps its seat through a reload, and a closed tab's seat can be picked back up from a new tab.
 
-The printed card images are in `web/public/cards`, about 40 MB, and the villain boards in `web/public/boards`. A card with no image shows as a parchment card.
+The printed card images are in `web/public/cards`, about 40 MB, and the location paintings in `web/public/locations`. A card with no image shows as a parchment card.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `npm test` | Runs the server and client tests |
-| `npm run cards` | Downloads any missing card images and boards from the Villainous wiki into `web/public`. Add `-- --check` to report matches without downloading |
+| `npm run cards` | Downloads any missing card images from the Villainous wiki into `web/public/cards`. Add `-- --check` to report matches without downloading |
 | `npm run build` | Builds both packages |
 | `npm run lint` | Lints the client |
 | `npm run typecheck -w server` | Type-checks the server and its tests |
@@ -59,9 +59,9 @@ web/src/
 2. If the villain starts with something in play, add it to `SPECIAL_SETUP` in `game/setup.ts`.
 3. Add `<id>Prof.jpg` and `<id>Back.jpg` to `web/public/character/`. Missing images fall back to initials and a default card back.
 4. Add a guide to `web/src/data/guides.ts`, and any character actions to `menus` in `web/src/components/CharacterMenu.tsx`.
-5. Give them a colour and a `--board` in `web/src/styles/tokens.css`. The colour tints the board whenever their Realm is on show.
-6. Add their board scan to `BOARDS` in `scripts/fetch-cards.mjs`.
-7. Run `npm run cards` to fetch their images. It only accepts a wiki page that names this villain, and lists anything it could not match.
+5. Give them a colour in `web/src/styles/tokens.css`. It tints the board whenever their Realm is on show.
+6. Run `npm run cards` to fetch their card images. It only accepts a wiki page that names this villain, and lists anything it could not match.
+7. Add their location paintings to `web/public/locations/<id>/`. `scripts/clean-locations.py` makes them from the wiki's scan of the board by removing the printed symbols. A location with no painting shows a plain panel.
 
 ## Adding a client event
 
@@ -90,7 +90,7 @@ The two packages deploy separately. Build output is not committed, so the host h
 
 **Client:** run `npm run build` from `web/` and serve `web/dist`.
 
-Card images and boards deploy with the client. They are Ravensburger and Disney's artwork, from the Villainous fan wiki. About 30 MB of them are the large copies behind the zoom button, which a browser only loads when a card is opened.
+Card images and location paintings deploy with the client. They are Ravensburger and Disney's artwork, from the Villainous fan wiki. About 30 MB of them are the large copies behind the zoom button, which a browser only loads when a card is opened.
 
 | Variable | Purpose |
 | --- | --- |
